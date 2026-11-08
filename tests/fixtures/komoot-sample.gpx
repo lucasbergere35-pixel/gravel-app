@@ -1,0 +1,43 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<gpx version="1.1" creator="https://www.komoot.de" xmlns="http://www.topografix.com/GPX/1/1" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd">
+  <metadata>
+    <name>Boucle gravel &amp; forêt</name>
+    <author>
+      <link href="https://www.komoot.de">
+        <text>komoot</text>
+        <type>text/html</type>
+      </link>
+    </author>
+  </metadata>
+  <trk>
+    <name>Boucle gravel &amp; forêt</name>
+    <trkseg>
+      <trkpt lat="48.110000" lon="-1.680000">
+        <ele>40.0</ele>
+        <time>2026-06-01T08:00:00.000Z</time>
+      </trkpt>
+      <trkpt lat="48.111000" lon="-1.680000">
+        <ele>42.0</ele>
+        <time>2026-06-01T08:00:20.000Z</time>
+      </trkpt>
+      <trkpt lat="48.111000" lon="-1.680000">
+        <ele>42.0</ele>
+        <time>2026-06-01T08:00:20.000Z</time>
+      </trkpt>
+      <trkpt lat="48.112000" lon="-1.680000">
+        <ele>45.5</ele>
+        <time>2026-06-01T08:00:40.000Z</time>
+      </trkpt>
+      <trkpt lat="48.113000" lon="-1.680000">
+        <time>2026-06-01T08:01:00.000Z</time>
+      </trkpt>
+      <trkpt lat="999" lon="-1.680000">
+        <ele>50.0</ele>
+      </trkpt>
+      <trkpt lat="48.114000" lon="-1.680000">
+        <ele>52.0</ele>
+        <time>2026-06-01T08:01:20.000Z</time>
+      </trkpt>
+    </trkseg>
+  </trk>
+</gpx>

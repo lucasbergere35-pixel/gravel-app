@@ -1,0 +1,3 @@
+# Fins de ligne Unix (LF) pour tous les fichiers texte, quel que soit l'OS.
+* text=auto eol=lf
+*.png binary

@@ -1,0 +1,241 @@
+/**
+ * Stockage local (IndexedDB) via la petite librairie `idb`.
+ *
+ * Organisation :
+ *  - routes      : infos légères d'un itinéraire (nom, stats) → liste rapide
+ *  - routeTracks : les milliers de points du tracé, chargés seulement à l'ouverture
+ *  - settings    : réglages clé/valeur (profil…)
+ *
+ * Pour faire évoluer la base (nouvelles tables : sorties, aliments…), on
+ * incrémente DB_VERSION et on ajoute un `if (oldVersion < N)` dans upgrade().
+ * Ne JAMAIS modifier un bloc de migration existant.
+ */
+import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
+import type { GpsFix } from '../core/gps/types';
+import type { TrackPoint, Waypoint } from '../core/types';
+import { computeRouteStats, STATS_VERSION, type RouteStats } from '../core/geo/stats';
+
+const DB_NAME = 'gravel-compagnon';
+const DB_VERSION = 2;
+
+export interface RouteMeta {
+  id: string;
+  name: string;
+  createdAt: number;
+  updatedAt: number;
+  sourceFileName?: string;
+  stats: RouteStats;
+  statsVersion: number;
+}
+
+export interface RouteTrack {
+  id: string;
+  points: TrackPoint[];
+  waypoints: Waypoint[];
+}
+
+export interface Profile {
+  /** Vitesse moyenne habituelle en gravel (km/h). Les autres champs arrivent à l'étape 3. */
+  avgSpeedKmh: number;
+}
+
+export const DEFAULT_PROFILE: Profile = { avgSpeedKmh: 18 };
+
+/** Une sortie réelle (ou simulée). Les positions sont dans le magasin ridePoints. */
+export interface RideMeta {
+  id: string;
+  routeId: string;
+  routeName: string;
+  startedAt: number;
+  /** null tant que la sortie est en cours. */
+  endedAt: number | null;
+  simulated: boolean;
+  distanceM: number;
+  movingTimeS: number;
+}
+
+/** Position enregistrée (déjà filtrée) d'une sortie. */
+export interface RidePoint extends GpsFix {
+  rideId: string;
+}
+
+interface GravelDB extends DBSchema {
+  routes: { key: string; value: RouteMeta; indexes: { byCreatedAt: number } };
+  routeTracks: { key: string; value: RouteTrack };
+  settings: { key: string; value: unknown };
+  rides: { key: string; value: RideMeta; indexes: { byStartedAt: number } };
+  ridePoints: { key: number; value: RidePoint; indexes: { byRide: string } };
+}
+
+let dbPromise: Promise<IDBPDatabase<GravelDB>> | null = null;
+
+function db(): Promise<IDBPDatabase<GravelDB>> {
+  if (!dbPromise) {
+    dbPromise = openDB<GravelDB>(DB_NAME, DB_VERSION, {
+      upgrade(database, oldVersion) {
+        if (oldVersion < 1) {
+          const routes = database.createObjectStore('routes', { keyPath: 'id' });
+          routes.createIndex('byCreatedAt', 'createdAt');
+          database.createObjectStore('routeTracks', { keyPath: 'id' });
+          database.createObjectStore('settings');
+        }
+        if (oldVersion < 2 && !database.objectStoreNames.contains('rides')) {
+          const rides = database.createObjectStore('rides', { keyPath: 'id' });
+          rides.createIndex('byStartedAt', 'startedAt');
+          const pts = database.createObjectStore('ridePoints', { autoIncrement: true });
+          pts.createIndex('byRide', 'rideId');
+        }
+        // if (oldVersion < 3) { ... } ← prochaines évolutions ici
+      },
+      blocking() {
+        // Une nouvelle version de l'appli (autre onglet) veut mettre la base à jour.
+        void dbPromise?.then((d) => d.close());
+        dbPromise = null;
+      },
+    }).catch((err: unknown) => {
+      dbPromise = null;
+      throw new Error(
+        "Impossible d'ouvrir le stockage local. Si tu es en navigation privée, ouvre l'appli normalement.",
+        { cause: err },
+      );
+    });
+  }
+  return dbPromise;
+}
+
+/** Demande au navigateur de ne pas effacer nos données en cas de manque de place. */
+export async function requestPersistentStorage(): Promise<void> {
+  try {
+    if (navigator.storage?.persist && !(await navigator.storage.persisted())) {
+      await navigator.storage.persist();
+    }
+  } catch {
+    /* non supporté : sans conséquence */
+  }
+}
+
+export function newId(): string {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID();
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+// ---------- Itinéraires ----------
+
+export async function listRoutes(): Promise<RouteMeta[]> {
+  const d = await db();
+  const metas = await d.getAll('routes');
+  // Recalcule les stats enregistrées avec une ancienne version de l'algorithme.
+  for (const meta of metas) {
+    if (meta.statsVersion !== STATS_VERSION) {
+      const track = await d.get('routeTracks', meta.id);
+      if (track) {
+        meta.stats = computeRouteStats(track.points);
+        meta.statsVersion = STATS_VERSION;
+        await d.put('routes', meta);
+      }
+    }
+  }
+  return metas.sort((a, b) => b.createdAt - a.createdAt);
+}
+
+export async function getRoute(id: string): Promise<{ meta: RouteMeta; track: RouteTrack } | null> {
+  const d = await db();
+  const [meta, track] = await Promise.all([d.get('routes', id), d.get('routeTracks', id)]);
+  if (!meta || !track) return null;
+  return { meta, track };
+}
+
+export async function addRoute(input: {
+  name: string;
+  points: TrackPoint[];
+  waypoints: Waypoint[];
+  sourceFileName?: string;
+}): Promise<RouteMeta> {
+  const now = Date.now();
+  const id = newId();
+  const meta: RouteMeta = {
+    id,
+    name: input.name,
+    createdAt: now,
+    updatedAt: now,
+    sourceFileName: input.sourceFileName,
+    stats: computeRouteStats(input.points),
+    statsVersion: STATS_VERSION,
+  };
+  const d = await db();
+  const tx = d.transaction(['routes', 'routeTracks'], 'readwrite');
+  await Promise.all([
+    tx.objectStore('routes').put(meta),
+    tx.objectStore('routeTracks').put({ id, points: input.points, waypoints: input.waypoints }),
+    tx.done,
+  ]);
+  return meta;
+}
+
+export async function renameRoute(id: string, name: string): Promise<void> {
+  const d = await db();
+  const meta = await d.get('routes', id);
+  if (!meta) throw new Error('Itinéraire introuvable.');
+  await d.put('routes', { ...meta, name, updatedAt: Date.now() });
+}
+
+export async function deleteRoute(id: string): Promise<void> {
+  const d = await db();
+  const tx = d.transaction(['routes', 'routeTracks'], 'readwrite');
+  await Promise.all([tx.objectStore('routes').delete(id), tx.objectStore('routeTracks').delete(id), tx.done]);
+}
+
+// ---------- Sorties ----------
+
+export async function createRide(input: { routeId: string; routeName: string; startedAt: number; simulated: boolean }): Promise<RideMeta> {
+  const ride: RideMeta = { id: newId(), endedAt: null, distanceM: 0, movingTimeS: 0, ...input };
+  const d = await db();
+  await d.put('rides', ride);
+  return ride;
+}
+
+export async function updateRide(ride: RideMeta): Promise<void> {
+  const d = await db();
+  await d.put('rides', ride);
+}
+
+/** Ajoute des positions et met à jour le résumé dans une seule transaction. */
+export async function appendRidePoints(ride: RideMeta, fixes: readonly GpsFix[]): Promise<void> {
+  const d = await db();
+  const tx = d.transaction(['rides', 'ridePoints'], 'readwrite');
+  const pts = tx.objectStore('ridePoints');
+  await Promise.all([...fixes.map((f) => pts.add({ ...f, rideId: ride.id })), tx.objectStore('rides').put(ride), tx.done]);
+}
+
+export async function getRidePoints(rideId: string): Promise<RidePoint[]> {
+  const d = await db();
+  return d.getAllFromIndex('ridePoints', 'byRide', rideId);
+}
+
+/** Sortie non terminée la plus récente (reprise après fermeture de l'appli). */
+export async function getActiveRide(): Promise<RideMeta | null> {
+  const d = await db();
+  const all = await d.getAll('rides');
+  const active = all.filter((r) => r.endedAt === null).sort((a, b) => b.startedAt - a.startedAt);
+  return active[0] ?? null;
+}
+
+export async function deleteRide(rideId: string): Promise<void> {
+  const d = await db();
+  const tx = d.transaction(['rides', 'ridePoints'], 'readwrite');
+  const keys = await tx.objectStore('ridePoints').index('byRide').getAllKeys(rideId);
+  await Promise.all([...keys.map((k) => tx.objectStore('ridePoints').delete(k)), tx.objectStore('rides').delete(rideId), tx.done]);
+}
+
+// ---------- Profil ----------
+
+export async function getProfile(): Promise<Profile> {
+  const d = await db();
+  const stored = (await d.get('settings', 'profile')) as Partial<Profile> | undefined;
+  return { ...DEFAULT_PROFILE, ...stored };
+}
+
+export async function saveProfile(profile: Profile): Promise<void> {
+  const d = await db();
+  await d.put('settings', profile, 'profile');
+}

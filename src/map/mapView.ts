@@ -369,6 +369,13 @@ export class MapView {
     if (!this.destroyed) this.map.resize();
   }
 
+  /** Après un déplacement de la carte dans la page : nouvelle taille + recadrage sur la position. */
+  relayout(): void {
+    if (this.destroyed) return;
+    this.map.resize();
+    this.updateCamera(true);
+  }
+
   /** Après destroy(), toutes les méthodes deviennent sans effet (appels différés tardifs). */
   destroy(): void {
     if (this.destroyed) return;

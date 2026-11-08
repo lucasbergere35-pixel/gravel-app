@@ -27,6 +27,7 @@ src/
     geo/elevation.ts   profil : interpolation → ré-échantillonnage 10 m → moyenne glissante 100 m → hystérésis 4 m
     geo/stats.ts       RouteStats + STATS_VERSION (incrémenter si l'algo change → recalcul auto)
     geo/track.ts       pointAtDistance
+    geo/climbs.ts      détection des montées (montée dès +8 m, fin à −10 m sous le sommet, rognage < 2 %, garde ≥ 20 m et ≥ 3 %), climbStatus (en cours / prochaine), gradeAt
     geo/trackMatch.ts  RouteMatcher : progression + écart au tracé, recherche locale (−200 m/+1,5 km) puis globale
     gps/heading.ts     HeadingEstimator : cap depuis les déplacements, > 5 km/h et ≥ 10 m, lissage circulaire, gardé à l'arrêt
     gps/filter.ts      GpsFilter : précision > 30 m, temps non croissant, vitesse > 90 km/h (marge = précisions)
@@ -42,8 +43,12 @@ src/
   map/mapView.ts       MapView (MapLibre) + createMapView (message si WebGL indisponible) ; mode sortie : flèche (Marker rotationAlignment map), boussole (tap = bascule), « sens de la marche » (bearing = cap, position au tiers bas via padding top = h/3) ou « nord en haut », trace bleue regroupée toutes les 2 s, suivi/recentrer ; en dev, `window.__gcMap`
   ui/
     router.ts          routeur par hash (#/, #/itineraire/:id, #/profil, #/sortie/:id, #/simulation/:id)
-    views/             écrans ; ride.ts = mode sortie (masque en-tête et onglets via body.ride-mode)
-    components/        profil altimétrique SVG, toasts
+    pager.ts           logique pure de pagination (glissement, page mémorisée) — testée
+    views/             écrans ; ride.ts = mode sortie (masque en-tête et onglets via body.ride-mode) en 3 pages :
+                       0 Tableau de bord (carte + chiffres + commandes), 1 Carte plein écran, 2 Profil (montées)
+    components/        elevationChart (fiche itinéraire), rideProfile (profil en sortie : parcouru bleu via clipPath, montée orange),
+                       ridePager (pages 3/4 + bandeau 1/4 : vitesse, km, cadenas, points ; glissement UNIQUEMENT sur le bandeau ;
+                       cadenas = voile plein écran, appui long 1 s pour déverrouiller ; zone d’alertes commune), toasts
   main.ts              coquille (en-tête, onglets), routeur, service worker
 scripts/make-icons.mjs génère les PNG d'icônes dans public/ (npm run icons)
 docs/GUIDE.md          guide pas à pas pour l'utilisateur (installation, test, mise en ligne, iPhone)
@@ -53,6 +58,7 @@ docs/GUIDE.md          guide pas à pas pour l'utilisateur (installation, test, 
 - Toute la logique de calcul va dans `core/` avec des tests ; pas d'accès DOM/IndexedDB dans `core/` (sauf DOMParser pour le GPX).
 - Base de données : pour une évolution, incrémenter `DB_VERSION` et ajouter un bloc `if (oldVersion < N)` dans `upgrade()`, rendu idempotent (`objectStoreNames.contains`). Ne jamais modifier un bloc existant. Attention en dev : le rechargement à chaud peut appliquer un `DB_VERSION` modifié avant le bloc de migration → écrire le bloc AVANT d'incrémenter la version.
 - Mode sortie : les positions acceptées sont enregistrées toutes les 15 s / 30 points et au passage en arrière-plan ; une sortie avec `endedAt === null` est proposée à la reprise (bannière dans la liste) et rejouée dans RideTracker. Les simulations sont supprimées à la fin et ne sont jamais reprises.
+- Mode sortie : UNE seule carte MapLibre, déplacée entre les emplacements des pages 0 et 1 (puis `relayout()`). La page affichée est mémorisée dans localStorage `gc.ride.page`. Les alertes (hors tracé, GPS) vont dans `pager.alerts`, jamais dans une page.
 - Dans le mode sortie, l'heure de référence vient de `PositionSource.now()` (accélérée en simulation), jamais directement de `Date.now()`.
 - Import de fichier : **ne pas mettre d'attribut `accept`** sur l'input (sinon les .gpx sont grisés dans Fichiers sur iOS).
 - iOS : pas de vibration ; le son est coupé par le bouton silencieux et doit être « débloqué » par un geste ; GPS suspendu écran verrouillé ; Wake Lock en mode écran d'accueil seulement depuis iOS 18.4 environ.
@@ -72,6 +78,7 @@ Déploiement : `git push` sur `main` → GitHub Actions → https://lucasbergere
 ## Feuille de route
 - [x] Étape 1 : projet, import GPX, carte, stats, profil altimétrique, liste (renommer/supprimer), export GPX, PWA, déploiement
 - [x] Étape 2 (+ carte orientée dans le sens de la marche, MapLibre) : mode sortie GPS (filtre, recalage, alerte hors tracé > 50 m / levée < 40 m, distance/D+ restants, temps total + temps en mouvement avec pause auto, Wake Lock, reprise au premier plan, enregistrement incrémental + reprise après fermeture, simulation)
+- [x] Mode sortie en 3 pages (tableau de bord / carte / profil avec montées), bandeau fixe, cadenas
 - [ ] Étape 3 : profil complet + modèle énergie (Crr 0,010, CdA ~0,40, rendement 24 %, puissance constante calée sur la vitesse moyenne) + plan nutrition (sources : Thomas/Erdman/Burke 2016 ACSM ; Jeukendrup 2014 ; Sawka 2007 ACSM) + **export/import de toutes les données en JSON**
 - [ ] Étape 4 : alertes nutrition en sortie (bannière, son, « Fait », rappel boisson ~20 min), export GPX de la sortie
 - Plus tard : BRouter, points d'eau OSM (Overpass), météo Open-Meteo, cartes hors ligne (autre source de tuiles), type de surface, bilan après sortie

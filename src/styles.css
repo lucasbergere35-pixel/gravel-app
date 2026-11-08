@@ -429,51 +429,109 @@ body.ride-mode main {
 .ride-intro .btn-huge {
   margin-top: 24px;
 }
-.gps-status {
-  font-size: 15px;
-  font-weight: 700;
-  padding: 6px 10px;
-  border-radius: 10px;
-  margin-bottom: 8px;
-  background: var(--surface);
+/* Structure plein écran : 3/4 pages, 1/4 bandeau. */
+.ride-live {
+  position: fixed;
+  inset: 0;
+  z-index: 500;
+  background: var(--bg);
+  padding: var(--safe-top) var(--safe-right) var(--safe-bottom) var(--safe-left);
 }
-.gps-status.ok {
-  background: #e8f5e9;
-  color: var(--success);
+.ride-shell {
+  height: 100%;
+  display: grid;
+  grid-template-rows: 3fr 1fr;
 }
-.gps-status.warn {
-  background: #fff8e1;
-  color: #6d4c00;
+.ride-pages {
+  position: relative;
+  overflow: hidden;
+  min-height: 0;
 }
-.gps-status.bad {
-  background: #ffebee;
-  color: var(--danger);
+.ride-track {
+  display: flex;
+  height: 100%;
+  transition: transform 0.25s ease;
+}
+.ride-page {
+  height: 100%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 8px;
+  overflow: hidden;
+}
+
+/* Alertes : au-dessus de toutes les pages. */
+.ride-alerts {
+  position: absolute;
+  top: 6px;
+  left: 8px;
+  right: 8px;
+  z-index: 1200;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  pointer-events: none;
 }
 .offtrack-banner {
-  position: sticky;
-  top: calc(var(--safe-top) + 4px);
-  z-index: 1100;
   background: var(--danger);
   color: #fff;
   font-size: 26px;
   font-weight: 900;
   text-align: center;
-  padding: 14px 10px;
+  padding: 12px 10px;
   border-radius: var(--radius);
-  margin-bottom: 8px;
+  box-shadow: 0 3px 12px #0006;
   animation: pulse 1.2s ease-in-out infinite;
+}
+.gps-alert {
+  background: #fff3cd;
+  color: #4a3400;
+  border: 2px solid #f9a825;
+  font-size: 18px;
+  font-weight: 800;
+  text-align: center;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  box-shadow: 0 3px 12px #0004;
+}
+.gps-alert.bad {
+  background: #ffebee;
+  color: var(--danger);
+  border-color: var(--danger);
+  font-size: 16px;
 }
 @keyframes pulse {
   50% {
     opacity: 0.75;
   }
 }
-.map-wrap {
+
+/* Carte (déplacée entre la page 1 et la page 2). */
+.map-slot {
   position: relative;
+  min-height: 0;
 }
-.map-ride {
-  height: 42vh;
-  min-height: 220px;
+.map-slot-dashboard {
+  flex: 1 1 45%;
+}
+.map-slot-full {
+  flex: 1 1 auto;
+  margin: -6px -8px; /* bord à bord */
+}
+.map-wrap {
+  position: absolute;
+  inset: 0;
+}
+/* Taille explicite : la feuille de style de MapLibre impose position: relative. */
+.map-wrap .map-ride {
+  width: 100%;
+  height: 100%;
+}
+.map-slot-full .map-ride {
+  border-radius: 0;
+  border: 0;
 }
 .recenter {
   position: absolute;
@@ -483,48 +541,265 @@ body.ride-mode main {
   z-index: 1000;
   box-shadow: 0 2px 10px #0005;
 }
+
+/* Page 1 : chiffres et commandes. */
 .ride-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 8px;
-  margin-top: 8px;
+  gap: 6px;
 }
 .ride-tile {
   background: var(--surface);
   border: 2px solid var(--border);
-  border-radius: var(--radius);
-  padding: 6px 10px;
-}
-.ride-tile-speed {
-  grid-column: 1 / -1;
-  text-align: center;
+  border-radius: 12px;
+  padding: 2px 8px;
 }
 .ride-value {
-  font-size: 38px;
+  font-size: 30px;
   font-weight: 900;
-  line-height: 1.05;
+  line-height: 1.1;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-.ride-tile-speed .ride-value {
-  font-size: 64px;
-}
 .ride-unit {
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 700;
 }
 .ride-label {
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 700;
   color: var(--muted);
+  white-space: nowrap;
 }
 .ride-note {
   color: #6d4c00;
 }
-@media (max-width: 360px) {
-  .ride-value {
-    font-size: 32px;
-  }
+.ride-controls {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+.ctrl-btn {
+  min-height: 52px;
+  padding: 4px;
+  font-size: 15px;
+}
+
+/* Page 3 : profil. */
+.climb-info {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.climb-box {
+  border: 3px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 12px;
+  background: var(--surface);
+}
+.climb-box.climbing {
+  border-color: #ef6c00;
+  background: #fff3e0;
+}
+.climb-title {
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--muted);
+}
+.climb-big {
+  font-size: 32px;
+  font-weight: 900;
+  line-height: 1.15;
+}
+.climb-figures {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+  font-size: 24px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.climb-line {
+  font-size: 20px;
+}
+.ride-profile-chart {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.ride-profile-chart svg {
+  display: block;
+}
+.ride-profile-chart .grid {
+  stroke: #0000001f;
+}
+.ride-profile-chart .tick {
+  font-size: 12px;
+  fill: var(--muted);
+}
+.ride-profile-chart .area-todo {
+  fill: #c2185b2b;
+}
+.ride-profile-chart .line-todo {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2.5;
+}
+.ride-profile-chart .area-done {
+  fill: #1565c040;
+}
+.ride-profile-chart .line-done {
+  fill: none;
+  stroke: #1565c0;
+  stroke-width: 3;
+}
+.ride-profile-chart .line-climb {
+  fill: none;
+  stroke: #ef6c00;
+  stroke-width: 6;
+  stroke-linecap: round;
+  opacity: 0.85;
+}
+.ride-profile-chart .cursor {
+  stroke: var(--text);
+  stroke-width: 2;
+}
+.ride-profile-chart .cursor-dot {
+  fill: #1565c0;
+  stroke: #fff;
+  stroke-width: 3;
+}
+
+/* Bandeau du bas : vitesse, km, cadenas, points de page. */
+.ride-band {
+  display: grid;
+  grid-template-rows: 1fr auto;
+  border-top: 4px solid var(--text);
+  background: var(--bg);
+  touch-action: none; /* le glissement sert à changer de page */
+  user-select: none;
+  -webkit-user-select: none;
+  min-height: 0;
+}
+.band-values {
+  display: grid;
+  grid-template-columns: 1fr 1fr 72px;
+  align-items: center;
+  padding: 0 8px;
+  min-height: 0;
+}
+.band-value {
+  text-align: center;
+}
+.band-number {
+  font-size: clamp(40px, 13vw, 64px);
+  font-weight: 900;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.band-unit {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--muted);
+}
+.band-lock {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  border: 3px solid var(--text);
+  background: var(--bg);
+  font-size: 30px;
+  cursor: pointer;
+}
+.band-dots {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+}
+.band-dot {
+  min-height: 52px;
+  border: 0;
+  background: transparent;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  font: inherit;
+  cursor: pointer;
+}
+.band-dot .dot {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 3px solid var(--text);
+}
+.band-dot.active .dot {
+  background: var(--text);
+}
+.dot-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+}
+.band-dot.active .dot-label {
+  color: var(--text);
+}
+
+/* Verrouillage. */
+.ride-shell.locked .ride-band {
+  border-top-color: var(--danger);
+}
+.ride-shell.locked .band-lock {
+  background: var(--danger);
+  border-color: var(--danger);
+}
+.lock-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 3000;
+  background: transparent;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding-bottom: calc(25vh + 8px);
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+.lock-badge {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  max-width: 90%;
+  padding: 10px 16px;
+  border-radius: var(--radius);
+  background: #111e;
+  color: #fff;
+  text-align: center;
+  font-size: 15px;
+}
+.lock-badge strong {
+  font-size: 20px;
+}
+.lock-progress {
+  width: 100%;
+  height: 6px;
+  border-radius: 3px;
+  background: #fff3;
+  position: relative;
+  overflow: hidden;
+}
+.lock-progress::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  width: 0;
+  background: #4caf50;
+}
+.lock-progress.running::after {
+  width: 100%;
+  transition: width 1s linear;
 }
 
 /* ---------- Carte (MapLibre) : contrôles plus gros au doigt ---------- */

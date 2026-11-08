@@ -7,11 +7,16 @@
  *   → RouteMatcher (progression sur le tracé, écart au tracé)
  *   → carte + affichage, et mise en file pour l'enregistrement (IndexedDB).
  *
+ * Affichage : 3 pages (Tableau de bord, Carte, Profil) + bandeau fixe en bas
+ * (voir components/ridePager.ts). Une seule carte MapLibre, déplacée entre la
+ * page 1 et la page 2 (deux cartes coûteraient deux fois plus de mémoire).
+ *
  * Robustesse :
  *  - les positions sont enregistrées toutes les 15 s et dès que l'appli passe
  *    en arrière-plan : si iOS ferme l'appli, la sortie peut être reprise ;
  *  - au retour au premier plan, le GPS et le maintien d'écran sont relancés.
  */
+import { climbStatus, detectClimbs } from '../../core/geo/climbs';
 import { cumulativeDistances } from '../../core/geo/distance';
 import { buildElevationProfile, cumulativeClimb, remainingClimb } from '../../core/geo/elevation';
 import { RouteMatcher, type MatchResult } from '../../core/geo/trackMatch';
@@ -34,6 +39,8 @@ import {
 import { DeviceGps, type PositionSource } from '../../services/geolocation';
 import { SimulatedGps } from '../../services/simulator';
 import { ScreenWakeLock } from '../../services/wakeLock';
+import { createRidePager } from '../components/ridePager';
+import { createRideProfile } from '../components/rideProfile';
 import { toast } from '../components/toast';
 import { el, errorMessage } from '../dom';
 import { clock, int, km } from '../format';
@@ -44,19 +51,23 @@ const OFF_TRACK_ON_M = 50;
 const OFF_TRACK_OFF_M = 40;
 const FLUSH_INTERVAL_MS = 15_000;
 const FLUSH_MAX_PENDING = 30;
+const PAGE_DASHBOARD = 0;
+const PAGE_MAP = 1;
 
 /** Une tuile de chiffre : retourne l'élément et une fonction pour changer la valeur. */
-function tile(label: string, unit: string, extraClass = ''): { node: HTMLElement; set: (v: string) => void; note: HTMLElement } {
+function tile(label: string, unit: string): { node: HTMLElement; set: (v: string) => void; note: HTMLElement } {
   const value = el('span', {}, '—');
   const note = el('span', { class: 'ride-note' });
   const node = el(
     'div',
-    { class: `ride-tile ${extraClass}` },
+    { class: 'ride-tile' },
     el('div', { class: 'ride-value' }, value, unit ? el('span', { class: 'ride-unit' }, unit) : null),
     el('div', { class: 'ride-label' }, label, note),
   );
   return { node, set: (v) => (value.textContent = v), note };
 }
+
+const fmt1 = (n: number) => n.toLocaleString('fr-FR', { maximumFractionDigits: 1, minimumFractionDigits: 1 });
 
 export function createRideView(simulated: boolean): View {
   return async (root, params) => {
@@ -70,7 +81,8 @@ export function createRideView(simulated: boolean): View {
     const cum = cumulativeDistances(track.points);
     const totalM = cum[cum.length - 1] ?? 0;
     const elevation = buildElevationProfile(track.points, cum);
-    const climbs = elevation ? cumulativeClimb(elevation.elevations) : null;
+    const cumClimb = elevation ? cumulativeClimb(elevation.elevations) : null;
+    const climbList = elevation ? detectClimbs(elevation) : [];
 
     // Sortie à reprendre ? (uniquement les vraies sorties, pas les simulations)
     let ride: RideMeta | null = null;
@@ -87,38 +99,56 @@ export function createRideView(simulated: boolean): View {
 
     document.body.classList.add('ride-mode');
 
-    // ---------- Interface ----------
+    // ---------- Éléments communs ----------
     const offTrackBanner = el('div', { class: 'offtrack-banner', hidden: true, role: 'alert' });
-    const gpsStatus = el('div', { class: 'gps-status' }, 'GPS en attente');
+    const gpsAlert = el('div', { class: 'gps-alert', hidden: true, role: 'alert' });
     const mapEl = el('div', { class: 'map map-ride' });
     const recenterBtn = el('button', { type: 'button', class: 'btn btn-small recenter', hidden: true }, '◎ Recentrer');
+    const mapWrap = el('div', { class: 'map-wrap' }, mapEl, recenterBtn);
 
-    const tSpeed = tile('Vitesse', ' km/h', 'ride-tile-speed');
-    const tDone = tile('Parcouru', ' km');
+    // ---------- Page 1 : tableau de bord ----------
     const tLeft = tile('Restant', ' km');
     const tClimbLeft = tile('D+ restant', ' m');
     const tAvg = tile('Moyenne', ' km/h');
     const tMoving = tile('En mouvement', '');
     const tTotal = tile('Temps total', '');
-    if (!climbs) tClimbLeft.set('n/d');
+    const tGps = tile('GPS', '');
+    if (!cumClimb) tClimbLeft.set('n/d');
 
-    const wakeBtn = el('button', { type: 'button', class: 'btn btn-block' }, 'Écran allumé : NON');
-    const orientBtn = el('button', { type: 'button', class: 'btn btn-block' });
-    const finishBtn = el('button', { type: 'button', class: 'btn btn-danger btn-block' }, 'Terminer la sortie');
-    const quitLink = el('a', { href: `#/itineraire/${encodeURIComponent(route.id)}`, class: 'back-link' }, '‹ Quitter (la sortie reste en cours)');
+    const orientBtn = el('button', { type: 'button', class: 'btn ctrl-btn' });
+    const wakeBtn = el('button', { type: 'button', class: 'btn ctrl-btn' }, 'Écran : NON');
+    const finishBtn = el('button', { type: 'button', class: 'btn btn-danger ctrl-btn' }, 'Terminer');
+    const quitLink = el('a', { href: `#/itineraire/${encodeURIComponent(route.id)}`, class: 'btn ctrl-btn' }, 'Quitter');
+    const mapSlotDashboard = el('div', { class: 'map-slot map-slot-dashboard' });
+    const mapSlotFull = el('div', { class: 'map-slot map-slot-full' });
 
-    const live = el(
-      'div',
-      { class: 'ride-live', hidden: true },
-      offTrackBanner,
-      gpsStatus,
-      el('div', { class: 'map-wrap' }, mapEl, recenterBtn),
-      el('div', { class: 'ride-grid' }, tSpeed.node, tDone.node, tLeft.node, tClimbLeft.node, tAvg.node, tMoving.node, tTotal.node),
-      el('div', { class: 'stack' }, orientBtn, wakeBtn, finishBtn),
-      quitLink,
+    // ---------- Page 3 : profil ----------
+    const profileInfo = el('div', { class: 'climb-info' });
+    const profileChart = elevation ? createRideProfile(elevation) : null;
+
+    const pager = createRidePager(['Tableau de bord', 'Carte', 'Profil'], (page) => {
+      // La carte suit la page affichée (tableau de bord ou carte plein écran).
+      const slot = page === PAGE_MAP ? mapSlotFull : page === PAGE_DASHBOARD ? mapSlotDashboard : null;
+      if (slot && mapWrap.parentElement !== slot) {
+        slot.append(mapWrap);
+        requestAnimationFrame(() => map?.relayout());
+      }
+      if (page === 2 && tracker) renderProfilePage(lastMatch ? lastMatch.alongM : null);
+    });
+    pager.alerts.append(offTrackBanner, gpsAlert);
+    pager.pages[0].append(
+      mapSlotDashboard,
+      el('div', { class: 'ride-grid' }, tLeft.node, tClimbLeft.node, tAvg.node, tMoving.node, tTotal.node, tGps.node),
+      el('div', { class: 'ride-controls' }, orientBtn, wakeBtn, finishBtn, quitLink),
     );
+    pager.pages[1].append(mapSlotFull);
+    pager.pages[2].append(
+      profileInfo,
+      profileChart ? profileChart.element : el('p', { class: 'muted' }, 'Ce GPX ne contient pas d’altitude : profil indisponible.'),
+    );
+    const live = el('div', { class: 'ride-live', hidden: true }, pager.element);
 
-    // Écran de départ
+    // ---------- Écran de départ ----------
     const factorSelect = el(
       'select',
       { id: 'sim-factor', class: 'select' },
@@ -132,7 +162,7 @@ export function createRideView(simulated: boolean): View {
       { class: 'ride-intro' },
       el('a', { href: `#/itineraire/${encodeURIComponent(route.id)}`, class: 'back-link' }, '‹ Retour'),
       el('h1', {}, simulated ? `Simulation : ${route.name}` : route.name),
-      el('p', {}, `${km(totalM)} km`),
+      el('p', {}, `${km(totalM)} km · ${climbList.length} montée${climbList.length > 1 ? 's' : ''} repérée${climbList.length > 1 ? 's' : ''}`),
       simulated
         ? el(
             'div',
@@ -147,6 +177,7 @@ export function createRideView(simulated: boolean): View {
             el('p', {}, 'Garde l’appli ouverte au premier plan. Si l’écran s’éteint, l’enregistrement s’interrompt et reprend au rallumage (un trait droit relie les deux points).'),
             ride ? el('p', { class: 'muted' }, 'Une sortie non terminée a été trouvée sur cet itinéraire : elle va être reprise.') : null,
           ),
+      el('p', { class: 'muted' }, 'En sortie : glisse sur le bandeau du bas (ou touche ● ○ ○) pour changer de page. 🔓 verrouille l’écran.'),
       startBtn,
     );
 
@@ -158,10 +189,7 @@ export function createRideView(simulated: boolean): View {
     const headingEstimator = new HeadingEstimator();
     // « Sens de la marche » par défaut en sortie ; le bouton ou la boussole basculent.
     let orientation: OrientationMode = 'heading';
-    const ORIENT_LABELS: Record<OrientationMode, string> = {
-      heading: 'Carte : sens de la marche ⟳',
-      north: 'Carte : nord en haut ⟳',
-    };
+    const ORIENT_LABELS: Record<OrientationMode, string> = { heading: 'Carte : marche', north: 'Carte : nord' };
     orientBtn.textContent = ORIENT_LABELS[orientation];
     function toggleOrientation(): void {
       orientation = orientation === 'heading' ? 'north' : 'heading';
@@ -185,11 +213,11 @@ export function createRideView(simulated: boolean): View {
 
     const wakeLock = new ScreenWakeLock((activeLock) => {
       if (!ScreenWakeLock.supported) return;
-      wakeBtn.textContent = `Écran allumé : ${activeLock ? 'OUI' : 'NON'}`;
+      wakeBtn.textContent = `Écran : ${activeLock ? 'OUI' : 'NON'}`;
       wakeBtn.classList.toggle('btn-on', activeLock);
     });
     if (!ScreenWakeLock.supported) {
-      wakeBtn.textContent = 'Écran allumé : non disponible';
+      wakeBtn.textContent = 'Écran : n/d';
       wakeBtn.disabled = true;
     }
 
@@ -211,40 +239,79 @@ export function createRideView(simulated: boolean): View {
       return flushing;
     }
 
+    function renderProfilePage(alongM: number | null): void {
+      if (!elevation || !cumClimb) {
+        profileInfo.replaceChildren();
+        return;
+      }
+      if (alongM === null) {
+        profileChart?.update(null, climbList[0] ?? null);
+        profileInfo.replaceChildren(el('div', { class: 'climb-line muted' }, 'En attente de la position…'));
+        return;
+      }
+      const status = climbStatus(climbList, elevation, alongM);
+      const left = el('div', { class: 'climb-line' }, 'D+ restant ', el('strong', {}, `${int(remainingClimb(elevation, cumClimb, alongM))} m`));
+      let main: HTMLElement;
+      if (status.current) {
+        const c = status.current;
+        main = el(
+          'div',
+          { class: 'climb-box climbing' },
+          el('div', { class: 'climb-title' }, '⛰ Montée en cours'),
+          el('div', { class: 'climb-big' }, `Sommet dans ${c.remainingM >= 1000 ? `${km(c.remainingM)} km` : `${int(c.remainingM)} m`}`),
+          el('div', { class: 'climb-figures' }, el('span', {}, `+${int(c.remainingGainM)} m`), el('span', {}, `pente ${int(c.gradePct)} %`)),
+        );
+      } else if (status.next) {
+        const n = status.next;
+        main = el(
+          'div',
+          { class: 'climb-box' },
+          el('div', { class: 'climb-title' }, 'Prochaine montée'),
+          el('div', { class: 'climb-big' }, `dans ${km(n.distanceToStartM)} km`),
+          el(
+            'div',
+            { class: 'climb-figures' },
+            el('span', {}, `${km(n.climb.lengthM)} km`),
+            el('span', {}, `${fmt1(n.climb.avgGradePct)} %`),
+            el('span', {}, `+${int(n.climb.gainM)} m`),
+          ),
+        );
+      } else {
+        main = el('div', { class: 'climb-box' }, el('div', { class: 'climb-big' }, 'Plus de montée jusqu’à l’arrivée'));
+      }
+      profileInfo.replaceChildren(main, left);
+      profileChart?.update(alongM, status.current?.climb ?? status.next?.climb ?? null);
+    }
+
     function render(): void {
       if (!tracker || !source) return;
       const now = source.now();
       const snap = tracker.snapshot(now);
 
-      tSpeed.set(snap.speedMs === null ? '—' : (snap.speedMs * 3.6).toLocaleString('fr-FR', { maximumFractionDigits: 1, minimumFractionDigits: 1 }));
-      tDone.set(km(snap.distanceM));
+      pager.setBand(snap.speedMs === null ? '—' : fmt1(snap.speedMs * 3.6), km(snap.distanceM));
       tMoving.set(clock(snap.movingTimeS));
       tTotal.set(clock(snap.totalTimeS));
-      tAvg.set(snap.movingTimeS > 30 ? ((snap.distanceM / snap.movingTimeS) * 3.6).toLocaleString('fr-FR', { maximumFractionDigits: 1 }) : '—');
+      tAvg.set(snap.movingTimeS > 30 ? fmt1((snap.distanceM / snap.movingTimeS) * 3.6) : '—');
       // « Pause auto » seulement si on a une position récente qui dit qu'on est arrêté
       // (pas pendant une coupure GPS, où l'on ne sait rien).
-      tMoving.note.textContent = snap.speedMs !== null && !snap.isMoving ? ' · ⏸ pause auto' : '';
+      tMoving.note.textContent = snap.speedMs !== null && !snap.isMoving ? ' ⏸ pause' : '';
       if (lastMatch) {
         tLeft.set(km(Math.max(0, totalM - lastMatch.alongM)));
-        if (elevation && climbs) tClimbLeft.set(int(remainingClimb(elevation, climbs, lastMatch.alongM)));
+        if (elevation && cumClimb) tClimbLeft.set(int(remainingClimb(elevation, cumClimb, lastMatch.alongM)));
       }
+      if (pager.current() === 2) renderProfilePage(lastMatch ? lastMatch.alongM : null);
 
-      // État GPS
+      // État GPS : discret dans le tableau de bord, alerte visible partout si problème.
       const age = snap.lastFix ? (now - snap.lastFix.time) / 1000 : Infinity;
-      gpsStatus.className = 'gps-status';
-      if (fatalError) {
-        gpsStatus.textContent = fatalError;
-        gpsStatus.classList.add('bad');
-      } else if (!snap.lastFix) {
-        gpsStatus.textContent = lastRejected ? `Signal GPS trop imprécis (±${int(lastRejected.accuracy)} m), patiente…` : 'Recherche du signal GPS…';
-        gpsStatus.classList.add('warn');
-      } else if (age > STALE_FIX_S) {
-        gpsStatus.textContent = `Pas de position depuis ${clock(age)}`;
-        gpsStatus.classList.add('warn');
-      } else {
-        gpsStatus.textContent = `GPS ±${int(snap.lastFix.accuracy)} m${source.simulated ? ' · SIMULATION' : ''}`;
-        gpsStatus.classList.add('ok');
-      }
+      let alert: string | null = null;
+      if (fatalError) alert = fatalError;
+      else if (!snap.lastFix) alert = lastRejected ? `Signal GPS trop imprécis (±${int(lastRejected.accuracy)} m), patiente…` : 'Recherche du signal GPS…';
+      else if (age > STALE_FIX_S) alert = `Pas de position depuis ${clock(age)}`;
+      gpsAlert.hidden = alert === null;
+      gpsAlert.textContent = alert ?? '';
+      gpsAlert.classList.toggle('bad', fatalError !== null);
+      tGps.set(snap.lastFix && age <= STALE_FIX_S ? `±${int(snap.lastFix.accuracy)} m` : '—');
+      tGps.note.textContent = source.simulated ? ' simulation' : '';
 
       // Hors tracé (seulement avec une position récente)
       if (lastMatch && age <= STALE_FIX_S) {
@@ -308,6 +375,9 @@ export function createRideView(simulated: boolean): View {
 
         intro.hidden = true;
         live.hidden = false;
+        // Page mémorisée (ou tableau de bord) ; place la carte au bon endroit.
+        mapSlotDashboard.append(mapWrap);
+        pager.setPage(pager.current());
         map = createMapView(mapEl);
         map?.showTrack(track.points);
         map?.enableRideMode({
@@ -343,6 +413,7 @@ export function createRideView(simulated: boolean): View {
         uiTimer = window.setInterval(render, 1000);
         flushTimer = window.setInterval(() => void flush(), FLUSH_INTERVAL_MS);
         render();
+        renderProfilePage(lastMatch ? lastMatch.alongM : null);
       } catch (err) {
         startBtn.disabled = false;
         toast(errorMessage(err), 'error');
@@ -364,10 +435,10 @@ export function createRideView(simulated: boolean): View {
     finishBtn.addEventListener('click', async () => {
       if (!finishBtn.classList.contains('confirm')) {
         finishBtn.classList.add('confirm');
-        finishBtn.textContent = 'Appuie encore pour terminer';
+        finishBtn.textContent = 'Confirmer ?';
         confirmTimer = window.setTimeout(() => {
           finishBtn.classList.remove('confirm');
-          finishBtn.textContent = 'Terminer la sortie';
+          finishBtn.textContent = 'Terminer';
         }, 4000);
         return;
       }
@@ -403,6 +474,8 @@ export function createRideView(simulated: boolean): View {
       stopTracking();
       void flush();
       document.body.classList.remove('ride-mode');
+      pager.destroy();
+      profileChart?.destroy();
       map?.destroy();
     };
   };

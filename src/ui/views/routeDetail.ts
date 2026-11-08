@@ -4,7 +4,7 @@ import { buildElevationProfile } from '../../core/geo/elevation';
 import { estimateDurationS } from '../../core/geo/stats';
 import { pointAtDistance } from '../../core/geo/track';
 import { writeGpx } from '../../core/gpx/write';
-import { MapView } from '../../map/mapView';
+import { createMapView } from '../../map/mapView';
 import { deleteRoute, getProfile, getRoute, renameRoute } from '../../services/db';
 import { safeFileName, shareOrDownload } from '../../services/files';
 import { createElevationChart } from '../components/elevationChart';
@@ -131,21 +131,21 @@ export const routeDetailView: View = async (root, params) => {
   );
 
   // La carte doit être créée une fois l'élément dans la page (pour connaître sa taille).
-  const map = new MapView(mapEl);
-  map.showTrack(track.points);
+  const map = createMapView(mapEl);
+  map?.showTrack(track.points);
   requestAnimationFrame(() => {
-    map.invalidateSize();
-    map.fitTrack();
+    map?.invalidateSize();
+    map?.fitTrack();
   });
 
   const chart = elevationProfile
-    ? createElevationChart(elevationProfile, (d) => map.setCursor(d === null ? null : pointAtDistance(track.points, cum, d)))
+    ? createElevationChart(elevationProfile, (d) => map?.setCursor(d === null ? null : pointAtDistance(track.points, cum, d)))
     : null;
   if (chart) root.querySelector('section.card')?.append(chart.element);
 
   return () => {
     window.clearTimeout(confirmTimer);
     chart?.destroy();
-    map.destroy();
+    map?.destroy();
   };
 };

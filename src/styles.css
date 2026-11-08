@@ -472,7 +472,7 @@ body.ride-mode main {
   position: relative;
 }
 .map-ride {
-  height: 36vh;
+  height: 42vh;
   min-height: 220px;
 }
 .recenter {
@@ -527,12 +527,61 @@ body.ride-mode main {
   }
 }
 
-/* ---------- Leaflet : contrôles plus gros au doigt ---------- */
-.leaflet-touch .leaflet-bar a {
-  width: 40px;
-  height: 40px;
-  line-height: 40px;
+/* ---------- Carte (MapLibre) : contrôles plus gros au doigt ---------- */
+.maplibregl-ctrl-group button {
+  width: 44px;
+  height: 44px;
 }
-.leaflet-control-attribution {
+.maplibregl-ctrl-group button.ctrl-layers {
+  width: auto;
+  padding: 0 10px;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+}
+.maplibregl-ctrl-group button.ctrl-compass {
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.ctrl-compass svg {
+  transition: transform 0.3s linear;
+}
+.maplibregl-ctrl-attrib {
   font-size: 11px;
+}
+
+/* Position en sortie : flèche (cap connu) ou point (cap inconnu). */
+.position-marker svg {
+  display: block;
+  filter: drop-shadow(0 1px 3px #0008);
+}
+.position-marker .pm-arrow {
+  fill: #1565c0;
+  stroke: #fff;
+  stroke-width: 3;
+  stroke-linejoin: round;
+}
+.position-marker .pm-dot {
+  display: none;
+  fill: #1565c0;
+  stroke: #fff;
+  stroke-width: 3;
+}
+.position-marker.no-heading .pm-arrow {
+  display: none;
+}
+.position-marker.no-heading .pm-dot {
+  display: inline;
+}
+.map-unavailable {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 16px;
+  text-align: center;
+  font-weight: 700;
 }

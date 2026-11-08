@@ -12,10 +12,10 @@ Robustesse et code clair > nombre de fonctionnalités. Mobile d'abord, lisible e
 
 ## Stack
 - Vite + TypeScript strict, **sans framework** (DOM via le helper `el()` de `src/ui/dom.ts`, jamais `innerHTML` avec des données).
-- Leaflet ; fonds **CyclOSM** (défaut) et OpenTopoMap, attribution visible, pas de pré-téléchargement de tuiles.
+- **MapLibre GL JS** (rotation native, `padding` pour décaler le centre) avec tuiles raster CyclOSM (défaut) et OpenTopoMap, attribution visible, pas de pré-téléchargement de tuiles. Leaflet a été abandonné : pas de rotation (plugins fragiles). Le worker MapLibre est fourni via `setWorkerUrl(...?url)` (sinon introuvable avec Vite) et doit rester dans le précache (`mjs` dans globPatterns).
 - IndexedDB via `idb`.
 - vite-plugin-pwa (manifest + service worker Workbox), `registerType: 'prompt'` : pas de rechargement automatique pendant une sortie, bannière « Mettre à jour ».
-- Vitest (+ happy-dom pour les tests qui ont besoin de DOMParser).
+- Vitest (+ jsdom pour les tests qui ont besoin de DOMParser ; happy-dom lit mal le XML).
 - Hébergement : GitHub Pages via GitHub Actions (`.github/workflows/deploy.yml`), base `/gravel-app/` (= nom du dépôt, voir `vite.config.ts`).
 
 ## Architecture
@@ -28,6 +28,7 @@ src/
     geo/stats.ts       RouteStats + STATS_VERSION (incrémenter si l'algo change → recalcul auto)
     geo/track.ts       pointAtDistance
     geo/trackMatch.ts  RouteMatcher : progression + écart au tracé, recherche locale (−200 m/+1,5 km) puis globale
+    gps/heading.ts     HeadingEstimator : cap depuis les déplacements, > 5 km/h et ≥ 10 m, lissage circulaire, gardé à l'arrêt
     gps/filter.ts      GpsFilter : précision > 30 m, temps non croissant, vitesse > 90 km/h (marge = précisions)
     ride/tracker.ts    RideTracker : distance, vitesse lissée, temps en mouvement (pause auto 3 / 1,5 km/h), trous > 15 s
     gpx/parse.ts       GPX 1.0/1.1, trk puis rte, ignore les namespaces (getElementsByTagNameNS('*'))
@@ -38,7 +39,7 @@ src/
     geolocation.ts     PositionSource + DeviceGps (watchPosition haute précision, relancé au retour premier plan)
     simulator.ts       SimulatedGps : rejoue un itinéraire (bruit, points imprécis, arrêt km 1, écart 80 m km 2, trou km 3)
     wakeLock.ts        ScreenWakeLock (redemandé au retour au premier plan)
-  map/mapView.ts       classe MapView (Leaflet) ; mode sortie : position, précision, trace bleue, suivi/recentrer
+  map/mapView.ts       MapView (MapLibre) + createMapView (message si WebGL indisponible) ; mode sortie : flèche (Marker rotationAlignment map), boussole (tap = bascule), « sens de la marche » (bearing = cap, position au tiers bas via padding top = h/3) ou « nord en haut », trace bleue regroupée toutes les 2 s, suivi/recentrer ; en dev, `window.__gcMap`
   ui/
     router.ts          routeur par hash (#/, #/itineraire/:id, #/profil, #/sortie/:id, #/simulation/:id)
     views/             écrans ; ride.ts = mode sortie (masque en-tête et onglets via body.ride-mode)
@@ -63,14 +64,14 @@ npm install        # une fois, après clonage
 npm run dev        # serveur local http://localhost:5173
 npm test           # tests unitaires
 npm run build      # vérification TypeScript + build dans dist/
-npm run preview    # sert dist/ (tester le service worker)
+npm run preview    # sert dist/ sous /gravel-app/ (comme en ligne)
 npm run icons      # regénérer les icônes
 ```
-Déploiement : `git push` sur `main` → GitHub Actions → https://<pseudo>.github.io/gravel-app/
+Déploiement : `git push` sur `main` → GitHub Actions → https://lucasbergere35-pixel.github.io/gravel-app/ (dépôt lucasbergere35-pixel/gravel-app). Le premier push demande une connexion GitHub interactive : le lancer dans un onglet Terminal de l'utilisateur.
 
 ## Feuille de route
 - [x] Étape 1 : projet, import GPX, carte, stats, profil altimétrique, liste (renommer/supprimer), export GPX, PWA, déploiement
-- [x] Étape 2 : mode sortie GPS (filtre, recalage, alerte hors tracé > 50 m / levée < 40 m, distance/D+ restants, temps total + temps en mouvement avec pause auto, Wake Lock, reprise au premier plan, enregistrement incrémental + reprise après fermeture, simulation)
+- [x] Étape 2 (+ carte orientée dans le sens de la marche, MapLibre) : mode sortie GPS (filtre, recalage, alerte hors tracé > 50 m / levée < 40 m, distance/D+ restants, temps total + temps en mouvement avec pause auto, Wake Lock, reprise au premier plan, enregistrement incrémental + reprise après fermeture, simulation)
 - [ ] Étape 3 : profil complet + modèle énergie (Crr 0,010, CdA ~0,40, rendement 24 %, puissance constante calée sur la vitesse moyenne) + plan nutrition (sources : Thomas/Erdman/Burke 2016 ACSM ; Jeukendrup 2014 ; Sawka 2007 ACSM) + **export/import de toutes les données en JSON**
 - [ ] Étape 4 : alertes nutrition en sortie (bannière, son, « Fait », rappel boisson ~20 min), export GPX de la sortie
 - Plus tard : BRouter, points d'eau OSM (Overpass), météo Open-Meteo, cartes hors ligne (autre source de tuiles), type de surface, bilan après sortie

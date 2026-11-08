@@ -9,8 +9,9 @@ import { VitePWA } from 'vite-plugin-pwa';
  */
 const REPO_BASE = '/gravel-app/';
 
-export default defineConfig(({ command }) => ({
-  base: command === 'build' ? REPO_BASE : '/',
+export default defineConfig(({ command, isPreview }) => ({
+  // Build et « npm run preview » : comme sur GitHub Pages. Développement : racine.
+  base: command === 'build' || isPreview ? REPO_BASE : '/',
   plugins: [
     VitePWA({
       // "prompt" : une nouvelle version n'est installée que si l'utilisateur
@@ -37,11 +38,16 @@ export default defineConfig(({ command }) => ({
       workbox: {
         // On met en cache l'appli elle-même (pas les tuiles de carte : leurs
         // conditions d'utilisation interdisent le pré-téléchargement).
-        globPatterns: ['**/*.{js,css,html,png,svg,webmanifest}'],
+        // .mjs : le « worker » de MapLibre (sans lui, la carte ne s'affiche pas hors connexion).
+        globPatterns: ['**/*.{js,mjs,css,html,png,svg,webmanifest}'],
         cleanupOutdatedCaches: true,
       },
     }),
   ],
+  build: {
+    // MapLibre pèse ~1 Mo (≈ 280 ko compressé) : c'est attendu, inutile d'avertir.
+    chunkSizeWarningLimit: 1500,
+  },
   test: {
     environment: 'node',
     include: ['tests/**/*.test.ts'],

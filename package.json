@@ -15,10 +15,9 @@
   },
   "dependencies": {
     "idb": "^8.0.4",
-    "leaflet": "^1.9.4"
+    "maplibre-gl": "^6.17.0"
   },
   "devDependencies": {
-    "@types/leaflet": "^1.9.22",
     "@types/node": "^26.6.6",
     "jsdom": "^31.0.0",
     "typescript": "^7.0.2",

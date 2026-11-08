@@ -16,9 +16,10 @@ import { cumulativeDistances } from '../../core/geo/distance';
 import { buildElevationProfile, cumulativeClimb, remainingClimb } from '../../core/geo/elevation';
 import { RouteMatcher, type MatchResult } from '../../core/geo/trackMatch';
 import { GpsFilter } from '../../core/gps/filter';
+import { HeadingEstimator } from '../../core/gps/heading';
 import type { GpsFix } from '../../core/gps/types';
 import { RideTracker, STALE_FIX_S } from '../../core/ride/tracker';
-import { MapView } from '../../map/mapView';
+import { createMapView, type MapView, type OrientationMode } from '../../map/mapView';
 import {
   appendRidePoints,
   createRide,
@@ -102,6 +103,7 @@ export function createRideView(simulated: boolean): View {
     if (!climbs) tClimbLeft.set('n/d');
 
     const wakeBtn = el('button', { type: 'button', class: 'btn btn-block' }, 'Écran allumé : NON');
+    const orientBtn = el('button', { type: 'button', class: 'btn btn-block' });
     const finishBtn = el('button', { type: 'button', class: 'btn btn-danger btn-block' }, 'Terminer la sortie');
     const quitLink = el('a', { href: `#/itineraire/${encodeURIComponent(route.id)}`, class: 'back-link' }, '‹ Quitter (la sortie reste en cours)');
 
@@ -112,7 +114,7 @@ export function createRideView(simulated: boolean): View {
       gpsStatus,
       el('div', { class: 'map-wrap' }, mapEl, recenterBtn),
       el('div', { class: 'ride-grid' }, tSpeed.node, tDone.node, tLeft.node, tClimbLeft.node, tAvg.node, tMoving.node, tTotal.node),
-      el('div', { class: 'stack' }, wakeBtn, finishBtn),
+      el('div', { class: 'stack' }, orientBtn, wakeBtn, finishBtn),
       quitLink,
     );
 
@@ -153,6 +155,20 @@ export function createRideView(simulated: boolean): View {
     // ---------- Logique ----------
     const filter = new GpsFilter();
     const matcher = new RouteMatcher(track.points, cum);
+    const headingEstimator = new HeadingEstimator();
+    // « Sens de la marche » par défaut en sortie ; le bouton ou la boussole basculent.
+    let orientation: OrientationMode = 'heading';
+    const ORIENT_LABELS: Record<OrientationMode, string> = {
+      heading: 'Carte : sens de la marche ⟳',
+      north: 'Carte : nord en haut ⟳',
+    };
+    orientBtn.textContent = ORIENT_LABELS[orientation];
+    function toggleOrientation(): void {
+      orientation = orientation === 'heading' ? 'north' : 'heading';
+      orientBtn.textContent = ORIENT_LABELS[orientation];
+      map?.setOrientation(orientation);
+    }
+    orientBtn.addEventListener('click', toggleOrientation);
     let tracker: RideTracker | null = null;
     let source: PositionSource | null = null;
     let lastMatch: MatchResult | null = null;
@@ -251,6 +267,7 @@ export function createRideView(simulated: boolean): View {
       fatalError = null;
       tracker.addFix(fix);
       lastMatch = matcher.match(fix.lat, fix.lon);
+      map?.setHeading(headingEstimator.update(fix));
       map?.setPosition(fix.lat, fix.lon, fix.accuracy);
       map?.extendRideLine(fix.lat, fix.lon);
       pending.push(fix);
@@ -291,9 +308,13 @@ export function createRideView(simulated: boolean): View {
 
         intro.hidden = true;
         live.hidden = false;
-        map = new MapView(mapEl);
-        map.showTrack(track.points);
-        map.enableRideMode((follow) => (recenterBtn.hidden = follow));
+        map = createMapView(mapEl);
+        map?.showTrack(track.points);
+        map?.enableRideMode({
+          orientation,
+          onFollowChange: (follow) => (recenterBtn.hidden = follow),
+          onOrientationToggle: toggleOrientation,
+        });
         requestAnimationFrame(() => {
           map?.invalidateSize();
           if (resumeFixes.length === 0) map?.fitTrack();
@@ -303,11 +324,13 @@ export function createRideView(simulated: boolean): View {
         for (const f of resumeFixes) {
           tracker.addFix(f);
           lastMatch = matcher.match(f.lat, f.lon);
+          headingEstimator.update(f);
         }
+        map?.setHeading(headingEstimator.heading);
         const lastFix = resumeFixes[resumeFixes.length - 1] ?? null;
         filter.prime(lastFix);
-        map.setRideLine(resumeFixes);
-        if (lastFix) map.setPosition(lastFix.lat, lastFix.lon, lastFix.accuracy);
+        map?.setRideLine(resumeFixes);
+        if (lastFix) map?.setPosition(lastFix.lat, lastFix.lon, lastFix.accuracy);
         resumeFixes = [];
 
         if (ScreenWakeLock.supported) {

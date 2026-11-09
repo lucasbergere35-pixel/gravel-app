@@ -882,29 +882,6 @@ body.ride-mode main {
   color: #5d4037;
   margin: 6px 0 10px;
 }
-.ib-actions {
-  display: grid;
-  grid-template-columns: 2fr 1fr 1fr;
-  gap: 8px;
-}
-.ib-actions .btn {
-  min-height: 64px;
-  font-size: 18px;
-  padding: 6px;
-}
-.ib-done {
-  font-size: 24px !important;
-}
-.ib-lock-hint {
-  display: none;
-  margin-top: 8px;
-  font-size: 15px;
-  font-weight: 700;
-  text-align: center;
-}
-.intake-banner.locked .ib-lock-hint {
-  display: block;
-}
 .drink-banner {
   display: flex;
   align-items: center;
@@ -918,32 +895,57 @@ body.ride-mode main {
   font-weight: 800;
   box-shadow: 0 4px 14px #0004;
 }
-.db-ok {
-  min-width: 90px;
-  min-height: 52px;
-  font-size: 18px;
+.intake-banner,
+.drink-banner {
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
 }
-/* Bouton à maintenir (écran verrouillé) : remplissage pendant l'appui. */
-.btn.holding {
-  background-image: linear-gradient(to right, #66bb6a88 0 100%);
-  background-size: 0% 100%;
-  background-repeat: no-repeat;
-  animation: hold-fill 0.6s linear forwards;
+.drink-banner {
+  flex-direction: column;
+  align-items: stretch;
 }
-@keyframes hold-fill {
+.banner-hint {
+  margin-top: 6px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--muted);
+  text-align: right;
+}
+/* Barre qui se vide en 40 s (durée d'affichage de la bannière). */
+.banner-timer {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 5px;
+  width: 100%;
+  background: currentColor;
+  opacity: 0.35;
+  transform-origin: left;
+  animation: banner-countdown 40s linear forwards;
+}
+@keyframes banner-countdown {
   to {
-    background-size: 100% 100%;
+    transform: scaleX(0);
   }
-}
-.intake.status-done {
-  border-color: var(--success);
-}
-.intake.status-skipped,
-.intake.status-due {
-  border-color: var(--danger);
 }
 .intake.status-pending {
   opacity: 0.6;
+}
+.intake-check .intake-km {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 20px;
+  min-height: 52px;
+}
+.intake.not-taken {
+  border-color: var(--danger);
+  background: #fff5f5;
+}
+.intake.not-taken .intake-what {
+  text-decoration: line-through;
+  color: var(--muted);
 }
 
 /* Page 3 : profil. */

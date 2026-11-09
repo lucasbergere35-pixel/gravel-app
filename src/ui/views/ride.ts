@@ -24,15 +24,12 @@ import { GpsFilter } from '../../core/gps/filter';
 import { FIRST_INTAKE_S } from '../../core/nutrition/plan';
 import { computeRouteNutrition, type RouteNutrition } from '../../core/nutrition/routePlan';
 import {
-  activeIntake,
   announcedIntake,
   drinkDue,
+  emptyPlan,
   freezePlan,
   initNutritionState,
-  markDone,
   markDrink,
-  markLater,
-  markSkipped,
   summarizeNutrition,
   updateIntakes,
   type RideNutritionState,
@@ -280,8 +277,6 @@ export function createRideView(simulated: boolean): View {
     let map: MapView | null = null;
     let stopped = false;
     let nut: RideNutritionState | null = null;
-    let drinkWasDue = false;
-    let lastPos: RidePosition = { alongM: null, onTrack: false, movingTimeS: 0 };
     const sound = new AlertSound(rideSettings.sound);
 
     function saveSettings(): void {
@@ -326,34 +321,8 @@ export function createRideView(simulated: boolean): View {
       flushing = flushing.then(() => updateRide(target)).catch((err: unknown) => console.error(err));
     }
 
-    const alertsUi = createRideAlerts(pager.priority, pager.alerts, {
-      isLocked: () => pager.isLocked(),
-      onDone: (id) => {
-        if (!nut) return;
-        markDone(nut, id, lastPos.movingTimeS);
-        saveNutrition();
-        render();
-      },
-      onLater: (id) => {
-        if (!nut) return;
-        markLater(nut, id, lastPos);
-        saveNutrition();
-        render();
-      },
-      onSkip: (id) => {
-        if (!nut) return;
-        markSkipped(nut, id);
-        saveNutrition();
-        render();
-      },
-      onDrinkOk: () => {
-        if (!nut) return;
-        markDrink(nut, lastPos.movingTimeS);
-        drinkWasDue = false;
-        saveNutrition();
-        render();
-      },
-    });
+    // Bannières sans bouton : 40 s ou un appui ; le son est joué à l'affichage.
+    const alertsUi = createRideAlerts(pager.priority, pager.alerts, (kind) => sound.play(kind));
 
     const wakeLock = new ScreenWakeLock((activeLock) => {
       if (!ScreenWakeLock.supported) return;
@@ -468,18 +437,23 @@ export function createRideView(simulated: boolean): View {
       // Ravitaillement : position sur le tracé si on y est, sinon temps estimé.
       if (nut) {
         const fresh = age <= STALE_FIX_S;
-        lastPos = {
+        const pos: RidePosition = {
           alongM: lastMatch && fresh ? lastMatch.alongM : null,
           onTrack: lastMatch !== null && fresh && !offTrack,
           movingTimeS: snap.movingTimeS,
         };
-        const events = updateIntakes(nut, lastPos);
-        if (events.length > 0) saveNutrition();
-        if (events.some((e) => e.kind === 'due')) sound.play('intake');
-        const drink = drinkDue(nut, snap.movingTimeS);
-        if (drink && !drinkWasDue) sound.play('drink');
-        drinkWasDue = drink;
-        alertsUi.update(activeIntake(nut), announcedIntake(nut), drink, lastPos.onTrack ? lastPos.alongM : null);
+        const events = updateIntakes(nut, pos);
+        // Toutes les prises déclenchées ensemble (ex. écran éteint) → une seule bannière.
+        const due = events.filter((e) => e.kind === 'due').map((e) => e.intake);
+        if (due.length > 0) alertsUi.showIntakes(due);
+        let changed = events.length > 0;
+        if (drinkDue(nut, snap.movingTimeS)) {
+          markDrink(nut, snap.movingTimeS);
+          alertsUi.showDrink();
+          changed = true;
+        }
+        if (changed) saveNutrition();
+        alertsUi.setAnnounced(announcedIntake(nut), pos.onTrack ? pos.alongM : null);
       }
     }
 
@@ -517,6 +491,7 @@ export function createRideView(simulated: boolean): View {
         sound.resume();
         void wakeLock.handleVisible();
         render();
+        alertsUi.onVisible(); // bannières arrivées écran éteint : affichées maintenant, 40 s
       }
     }
 
@@ -534,12 +509,12 @@ export function createRideView(simulated: boolean): View {
           if (other && !other.simulated) await updateRide({ ...other, endedAt: Date.now() });
           nut = routeNutrition
             ? initNutritionState(freezePlan(routeNutrition.plan, routeNutrition.during.targetGPerH), rideSettings.drinkIntervalMin * 60)
-            : initNutritionState({ intakes: [], targetGPerH: 0, plannedTotalG: 0, fuelStartS: FIRST_INTAKE_S, frozenAt: Date.now() }, rideSettings.drinkIntervalMin * 60);
+            : initNutritionState(emptyPlan(FIRST_INTAKE_S), rideSettings.drinkIntervalMin * 60);
           ride = await createRide({ routeId: route.id, routeName: route.name, startedAt: source.now(), simulated, nutrition: nut });
         } else {
           nut =
             resumedNutrition ??
-            initNutritionState({ intakes: [], targetGPerH: 0, plannedTotalG: 0, fuelStartS: FIRST_INTAKE_S, frozenAt: Date.now() }, rideSettings.drinkIntervalMin * 60);
+            initNutritionState(emptyPlan(FIRST_INTAKE_S), rideSettings.drinkIntervalMin * 60);
           nut.drinkIntervalS = rideSettings.drinkIntervalMin * 60;
           ride.nutrition = nut;
         }

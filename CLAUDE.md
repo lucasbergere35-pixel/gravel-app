@@ -54,11 +54,12 @@ src/
                        chaque prise a un « why » (raison affichée). Test clé : total ≤ objectif + 10 %.
     nutrition/routePlan.ts  prepareRoute / computeEnergy / computePlan / computeRouteNutrition : calcul du plan PARTAGÉ
                        par l'écran nutrition et le démarrage d'une sortie (même plan garanti)
-    ride/intakes.ts    prises en sortie : plan FIGÉ (freezePlan), états pending/due/done/skipped ; déclenchement sur la
+    ride/intakes.ts    prises en sortie : plan FIGÉ (freezePlan), états pending → done (FAITE PAR DÉFAUT au déclenchement)
+                       → skipped (décochée dans le bilan, setTaken) ; « due » (ancienne version) = done ; déclenchement sur la
                        position LE LONG DU TRACÉ (recalage), ou au temps en mouvement estimé si hors tracé/sans position ;
-                       pré-alerte 500 m (90 s) ; « Plus tard » = +1 km (+4 min hors tracé) ; une prise due reste due ;
-                       rappel boisson toutes les N min de temps en mouvement, pas < 5 min après une prise ni pendant une
-                       prise affichée ; summarizeNutrition (g/h seulement si ≥ 15 min couvertes)
+                       pré-alerte 500 m (90 s) ; rappel boisson toutes les N min de temps en mouvement, pas < 5 min après une
+                       prise, compté dès l'affichage (markDrink) ; describeIntakes (texte, regroupement « N prises à
+                       rattraper ») ; summarizeNutrition (g/h seulement si ≥ 15 min couvertes)
     ride/summary.ts    bilan (D+ GPS lissé, vitesse moyenne), ressenti (bonne / coup de mou / fringale + km), GPX de la sortie
     backup.ts          format JSON de sauvegarde (app, version, stores), parseBackup (vérifie tout avant d'écrire), describeBackup
   services/    accès aux API du navigateur
@@ -86,9 +87,11 @@ src/
     components/        elevationChart (fiche itinéraire), rideProfile (profil en sortie : parcouru bleu via clipPath, montée orange),
                        ridePager (pages 3/4 + bandeau 1/4 : vitesse, km, cadenas, points ; glissement UNIQUEMENT sur le bandeau ;
                        cadenas = voile plein écran, appui long 1 s pour déverrouiller ; zone d’alertes commune ; zone « priority »
-                       AU-DESSUS du voile), rideAlerts (pré-alerte, bannière de prise Fait/Plus tard/Passer, bannière boisson ;
-                       écran verrouillé → boutons à MAINTENIR 0,6 s), toasts
-                       views/rides.ts : « Mes sorties » + bilan (stats, bilan nutrition, ressenti, export GPX, suppression)
+                       AU-DESSUS du voile), rideAlerts (pré-alerte ; bannières de prise et de boisson SANS BOUTON : son + 40 s
+                       (BANNER_MS) ou un appui pour fermer, même cadenas actif ; appli en arrière-plan → bannière en
+                       attente, affichée 40 s au retour (onVisible), prises non vues regroupées), toasts
+                       views/rides.ts : « Mes sorties » + bilan (stats, bilan nutrition avec cases à décocher → recalcul et
+                       enregistrement, ressenti, export GPX, suppression)
   main.ts              coquille (en-tête, onglets), routeur, service worker
 scripts/make-icons.mjs génère les PNG d'icônes dans public/ (npm run icons)
 docs/GUIDE.md          guide pas à pas pour l'utilisateur (installation, test, mise en ligne, iPhone)
@@ -115,6 +118,15 @@ npm run preview    # sert dist/ sous /gravel-app/ (comme en ligne)
 npm run icons      # regénérer les icônes
 ```
 Déploiement : `git push` sur `main` → GitHub Actions → https://lucasbergere35-pixel.github.io/gravel-app/ (dépôt lucasbergere35-pixel/gravel-app). Le premier push demande une connexion GitHub interactive : le lancer dans un onglet Terminal de l'utilisateur.
+
+## Hors connexion
+- Service worker (Workbox) : précache de TOUTE l'appli (html, js, css, worker MapLibre .mjs, icônes, manifest) + navigation →
+  index.html. L'appli démarre en mode Avion si elle a été ouverte une fois en ligne depuis la dernière mise à jour.
+- Données (IndexedDB), GPS, calculs, alertes, sons, import/export de fichiers : fonctionnent sans réseau.
+- Fonds de carte (tuiles raster CyclOSM/OpenTopoMap) : PAS mis en cache par l'appli (conditions d'utilisation) ; seul le cache
+  HTTP du navigateur peut en garder quelques-unes. Hors ligne : fond gris, mais tracé, position et trace restent affichés.
+- Cartes hors ligne : non faites. Piste privilégiée : tuiles VECTORIELLES (OpenFreeMap ou extrait PMTiles Protomaps) téléchargées
+  autour de l'itinéraire dans IndexedDB, servies à MapLibre via addProtocol. Ne pas télécharger en masse les tuiles OSM/CyclOSM/OTM.
 
 ## Feuille de route
 - [x] Étape 1 : projet, import GPX, carte, stats, profil altimétrique, liste (renommer/supprimer), export GPX, PWA, déploiement

@@ -10,19 +10,19 @@
  *  - hors tracé (ou sans position recalée) : au temps en mouvement estimé par
  *    le plan, pour ne jamais sauter une prise.
  * Pré-alerte discrète PRE_ALERT_M avant (ou PRE_ALERT_S avant au temps).
- * « Plus tard » : nouveau rappel SNOOZE_M plus loin (ou SNOOZE_S hors tracé).
- * Une prise déclenchée reste « due » tant qu'elle n'est pas traitée.
+ *
+ * Pas de bouton pendant la sortie : une prise déclenchée est considérée comme
+ * FAITE par défaut. Dans le bilan, on peut décocher celles qui n'ont pas été
+ * prises (setTaken).
  *
  * Rappel boisson : toutes les drinkIntervalS de temps en mouvement, jamais
- * dans les DRINK_QUIET_AFTER_INTAKE_S qui suivent une prise, ni pendant
- * qu'une prise est affichée.
+ * dans les DRINK_QUIET_AFTER_INTAKE_S qui suivent une prise. Le rappel est
+ * compté dès qu'il est affiché.
  */
 import type { NutritionPlan } from '../nutrition/plan';
 
 export const PRE_ALERT_M = 500;
 export const PRE_ALERT_S = 90;
-export const SNOOZE_M = 1000;
-export const SNOOZE_S = 4 * 60;
 export const DRINK_QUIET_AFTER_INTAKE_S = 5 * 60;
 export const DEFAULT_DRINK_INTERVAL_S = 20 * 60;
 
@@ -45,17 +45,25 @@ export interface FrozenPlan {
   frozenAt: number;
 }
 
-export type IntakeStatus = 'pending' | 'due' | 'done' | 'skipped';
+/**
+ * pending : pas encore atteinte ; done : déclenchée (faite par défaut) ;
+ * skipped : décochée dans le bilan (pas prise).
+ * (Les sorties enregistrées avec une version précédente peuvent contenir « due » :
+ * traité comme « done ».)
+ */
+export type IntakeStatus = 'pending' | 'done' | 'skipped';
 
 export interface IntakeState {
   id: string;
-  status: IntakeStatus;
+  status: IntakeStatus | 'due';
   preAlerted: boolean;
-  snoozeUntilM: number | null;
-  snoozeUntilS: number | null;
-  laterCount: number;
+  /** Temps en mouvement (s) au déclenchement. */
   dueAtS: number | null;
-  doneAtS: number | null;
+  /** Champs d'anciennes versions, ignorés. */
+  laterCount?: number;
+  snoozeUntilM?: number | null;
+  snoozeUntilS?: number | null;
+  doneAtS?: number | null;
 }
 
 export interface RideNutritionState {
@@ -95,19 +103,14 @@ export function freezePlan(plan: NutritionPlan, targetGPerH: number, now = Date.
   };
 }
 
+export function emptyPlan(fuelStartS: number, now = Date.now()): FrozenPlan {
+  return { intakes: [], targetGPerH: 0, plannedTotalG: 0, fuelStartS, frozenAt: now };
+}
+
 export function initNutritionState(plan: FrozenPlan, drinkIntervalS = DEFAULT_DRINK_INTERVAL_S): RideNutritionState {
   return {
     plan,
-    states: plan.intakes.map((i) => ({
-      id: i.id,
-      status: 'pending',
-      preAlerted: false,
-      snoozeUntilM: null,
-      snoozeUntilS: null,
-      laterCount: 0,
-      dueAtS: null,
-      doneAtS: null,
-    })),
+    states: plan.intakes.map((i) => ({ id: i.id, status: 'pending', preAlerted: false, dueAtS: null })),
     drinkIntervalS,
     lastDrinkAtS: 0,
     lastIntakeAtS: null,
@@ -115,29 +118,31 @@ export function initNutritionState(plan: FrozenPlan, drinkIntervalS = DEFAULT_DR
   };
 }
 
-function find(state: RideNutritionState, id: string): { intake: FrozenIntake; st: IntakeState } | null {
-  const k = state.plan.intakes.findIndex((i) => i.id === id);
-  return k < 0 ? null : { intake: state.plan.intakes[k], st: state.states[k] };
+/** Prise atteinte (déclenchée), qu'elle ait été prise ou non. */
+export function isReached(st: IntakeState): boolean {
+  return st.status !== 'pending';
 }
 
-/** Met à jour les prises selon la position ; retourne les nouvelles pré-alertes et alertes. */
+/** Prise comptée comme prise (faite par défaut, sauf si décochée). */
+export function isTaken(st: IntakeState): boolean {
+  return st.status === 'done' || st.status === 'due';
+}
+
+/** Met à jour les prises selon la position ; retourne les nouvelles pré-alertes et prises déclenchées. */
 export function updateIntakes(state: RideNutritionState, pos: RidePosition): IntakeEvent[] {
   const events: IntakeEvent[] = [];
   const useTrack = pos.onTrack && pos.alongM !== null;
   state.plan.intakes.forEach((intake, k) => {
     const st = state.states[k];
     if (st.status !== 'pending') return;
-    const snoozed = st.snoozeUntilM !== null || st.snoozeUntilS !== null;
-    const triggerM = snoozed && st.snoozeUntilM !== null ? st.snoozeUntilM : intake.distanceM;
-    const triggerS = snoozed && st.snoozeUntilS !== null ? st.snoozeUntilS : intake.timeS;
-    const reached = useTrack ? pos.alongM! >= triggerM : pos.movingTimeS >= triggerS;
+    const reached = useTrack ? pos.alongM! >= intake.distanceM : pos.movingTimeS >= intake.timeS;
     if (reached) {
-      st.status = 'due';
+      st.status = 'done'; // faite par défaut
       st.dueAtS = pos.movingTimeS;
       state.lastIntakeAtS = pos.movingTimeS;
       events.push({ kind: 'due', intake });
-    } else if (!st.preAlerted && !snoozed) {
-      const near = useTrack ? pos.alongM! >= triggerM - PRE_ALERT_M : pos.movingTimeS >= triggerS - PRE_ALERT_S;
+    } else if (!st.preAlerted) {
+      const near = useTrack ? pos.alongM! >= intake.distanceM - PRE_ALERT_M : pos.movingTimeS >= intake.timeS - PRE_ALERT_S;
       if (near) {
         st.preAlerted = true;
         events.push({ kind: 'pre', intake });
@@ -147,61 +152,60 @@ export function updateIntakes(state: RideNutritionState, pos: RidePosition): Int
   return events;
 }
 
-/** Prise à afficher (la plus ancienne déclenchée et non traitée). */
-export function activeIntake(state: RideNutritionState): FrozenIntake | null {
-  const k = state.states.findIndex((s) => s.status === 'due');
-  return k < 0 ? null : state.plan.intakes[k];
+export interface IntakeBannerText {
+  title: string;
+  lines: string[];
+}
+
+/**
+ * Texte de la bannière pour une ou plusieurs prises déclenchées ensemble
+ * (plusieurs = prises passées pendant que l'écran était éteint).
+ */
+export function describeIntakes(intakes: readonly FrozenIntake[]): IntakeBannerText {
+  const km = (m: number) => Math.round(m / 1000);
+  const g = (n: number) => `${Math.round(n)} g`;
+  if (intakes.length === 1) {
+    const i = intakes[0];
+    return { title: `Km ${km(i.distanceM)} : ${i.label}`, lines: [`${i.reason === 'preClimb' ? '⛰ ' : ''}${i.why} · ${g(i.carbsG)}`] };
+  }
+  const total = intakes.reduce((s, i) => s + i.carbsG, 0);
+  return {
+    title: `${intakes.length} prises à rattraper`,
+    lines: [...intakes.map((i) => `Km ${km(i.distanceM)} : ${i.label} (${g(i.carbsG)})`), `Total ${g(total)}, en une ou deux fois`],
+  };
 }
 
 /** Prochaine prise annoncée par une pré-alerte (non encore déclenchée). */
 export function announcedIntake(state: RideNutritionState): FrozenIntake | null {
-  const k = state.states.findIndex((s) => s.status === 'pending' && s.preAlerted && s.snoozeUntilM === null && s.snoozeUntilS === null);
+  const k = state.states.findIndex((s) => s.status === 'pending' && s.preAlerted);
   return k < 0 ? null : state.plan.intakes[k];
 }
 
-export function markDone(state: RideNutritionState, id: string, movingTimeS: number): void {
-  const f = find(state, id);
-  if (!f) return;
-  f.st.status = 'done';
-  f.st.doneAtS = movingTimeS;
-  state.lastIntakeAtS = movingTimeS;
+/** Bilan : cocher / décocher une prise atteinte (prise ou pas). */
+export function setTaken(state: RideNutritionState, id: string, taken: boolean): void {
+  const k = state.plan.intakes.findIndex((i) => i.id === id);
+  if (k < 0 || !isReached(state.states[k])) return;
+  state.states[k].status = taken ? 'done' : 'skipped';
 }
 
-export function markSkipped(state: RideNutritionState, id: string): void {
-  const f = find(state, id);
-  if (f) f.st.status = 'skipped';
-}
-
-/** « Plus tard » : nouveau rappel 1 km plus loin sur le tracé (ou 4 min hors tracé). */
-export function markLater(state: RideNutritionState, id: string, pos: RidePosition): void {
-  const f = find(state, id);
-  if (!f) return;
-  f.st.status = 'pending';
-  f.st.laterCount++;
-  f.st.preAlerted = true;
-  f.st.snoozeUntilM = Math.max(pos.alongM ?? f.intake.distanceM, f.intake.distanceM) + SNOOZE_M;
-  f.st.snoozeUntilS = pos.movingTimeS + SNOOZE_S;
-}
-
+/** Rappel boisson à afficher maintenant ? (Pas dans les 5 min qui suivent une prise.) */
 export function drinkDue(state: RideNutritionState, movingTimeS: number): boolean {
   if (state.drinkIntervalS <= 0) return false;
-  if (activeIntake(state)) return false;
   if (movingTimeS - state.lastDrinkAtS < state.drinkIntervalS) return false;
   return state.lastIntakeAtS === null || movingTimeS - state.lastIntakeAtS >= DRINK_QUIET_AFTER_INTAKE_S;
 }
 
+/** Le rappel boisson a été affiché : on repart pour un intervalle. */
 export function markDrink(state: RideNutritionState, movingTimeS: number): void {
   state.lastDrinkAtS = movingTimeS;
   state.drinkCount++;
 }
 
 export interface NutritionSummary {
-  done: number;
-  /** Prises repoussées au moins une fois (« Plus tard »). */
-  postponed: number;
-  skipped: number;
-  /** Prises atteintes mais jamais traitées. */
-  missed: number;
+  /** Prises atteintes et comptées comme prises. */
+  taken: number;
+  /** Prises atteintes mais décochées. */
+  notTaken: number;
   /** Prises non atteintes (sortie arrêtée avant). */
   notReached: number;
   takenG: number;
@@ -219,31 +223,27 @@ export interface NutritionSummary {
 export const MIN_FUEL_HOURS = 0.25;
 
 export function summarizeNutrition(state: RideNutritionState, movingTimeS: number): NutritionSummary {
-  let done = 0;
-  let postponed = 0;
-  let skipped = 0;
-  let missed = 0;
+  let taken = 0;
+  let notTaken = 0;
   let notReached = 0;
   let takenG = 0;
   let plannedG = 0;
   state.plan.intakes.forEach((intake, k) => {
     const st = state.states[k];
-    if (st.laterCount > 0) postponed++;
-    const reached = st.status !== 'pending' || st.laterCount > 0;
-    if (reached) plannedG += intake.carbsG;
-    if (st.status === 'done') {
-      done++;
+    if (!isReached(st)) {
+      notReached++;
+      return;
+    }
+    plannedG += intake.carbsG;
+    if (isTaken(st)) {
+      taken++;
       takenG += intake.carbsG;
-    } else if (st.status === 'skipped') skipped++;
-    else if (st.status === 'due' || st.laterCount > 0) missed++;
-    else notReached++;
+    } else notTaken++;
   });
   const fuelHours = Math.max(0, (movingTimeS - state.plan.fuelStartS) / 3600);
   return {
-    done,
-    postponed,
-    skipped,
-    missed,
+    taken,
+    notTaken,
     notReached,
     takenG,
     plannedG,

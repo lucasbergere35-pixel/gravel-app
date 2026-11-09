@@ -1,7 +1,7 @@
 /**
  * Écrans « Mes sorties » (liste) et « Bilan de sortie » (détail, ressenti, export GPX).
  */
-import type { IntakeStatus } from '../../core/ride/intakes';
+import { isReached, isTaken, setTaken, summarizeNutrition, type NutritionSummary } from '../../core/ride/intakes';
 import { FEELING_LABELS, rideToGpx, sanitizeFeeling, type FeelingKind } from '../../core/ride/summary';
 import { deleteRide, getRide, getRidePoints, listFinishedRides, updateRide, type RideMeta } from '../../services/db';
 import { safeFileName, shareOrDownload } from '../../services/files';
@@ -34,7 +34,7 @@ export const ridesListView: View = async (root) => {
           { class: 'stack' },
           ...rides.map((r) => {
             const s = r.summary;
-            const n = s?.nutrition;
+            const n: NutritionSummary | null = r.nutrition ? summarizeNutrition(r.nutrition, s?.movingTimeS ?? r.movingTimeS) : null;
             return el(
               'a',
               { class: 'card route-card', href: `#/sorties/${encodeURIComponent(r.id)}` },
@@ -44,7 +44,7 @@ export const ridesListView: View = async (root) => {
                 { class: 'route-card-stats' },
                 el('span', {}, el('strong', {}, km(s?.distanceM ?? r.distanceM)), ' km'),
                 el('span', {}, el('strong', {}, clock(s?.movingTimeS ?? r.movingTimeS)), ' en mvt'),
-                n && n.done + n.skipped + n.missed > 0 ? el('span', {}, `🍌 ${n.done}/${n.done + n.skipped + n.missed}`) : null,
+                n && n.taken + n.notTaken > 0 ? el('span', {}, `🍌 ${n.taken}/${n.taken + n.notTaken}`) : null,
                 r.feeling ? el('span', {}, FEELING_LABELS[r.feeling.kind].split(' ')[0]) : null,
                 el('span', { class: 'muted' }, date(r.startedAt)),
               ),
@@ -56,13 +56,6 @@ export const ridesListView: View = async (root) => {
 
 // ---------- Bilan ----------
 
-const STATUS_LABELS: Record<IntakeStatus, string> = {
-  done: '✓ faite',
-  skipped: '✗ passée',
-  due: '… non traitée',
-  pending: '— non atteinte',
-};
-
 export const rideSummaryView: View = async (root, params) => {
   const ride = await getRide(params.id);
   if (!ride || ride.endedAt === null) {
@@ -71,8 +64,8 @@ export const rideSummaryView: View = async (root, params) => {
     return;
   }
   const s = ride.summary;
-  const n = s?.nutrition ?? null;
   const nut = ride.nutrition;
+  const movingTimeS = s?.movingTimeS ?? ride.movingTimeS;
 
   // ---------- Statistiques ----------
   const stats = el(
@@ -83,27 +76,25 @@ export const rideSummaryView: View = async (root, params) => {
     stat('En mouvement', clock(s?.movingTimeS ?? ride.movingTimeS), ''),
     stat('Temps total', s ? clock(s.totalTimeS) : '—', ''),
     stat('Dénivelé + (GPS)', s?.gainM !== null && s?.gainM !== undefined ? int(s.gainM) : 'n/d', s?.gainM !== null && s?.gainM !== undefined ? ' m' : ''),
-    n ? stat('Boissons (rappels OK)', int(n.drinks), '') : null,
+    nut ? stat('Rappels boisson', int(nut.drinkCount), '') : null,
   );
 
   // ---------- Bilan nutrition ----------
-  const nutritionCard = el('section', { class: 'card' }, el('h2', {}, '🍌 Bilan nutrition'));
-  if (!n || !nut || nut.plan.intakes.length === 0) {
-    nutritionCard.append(el('p', { class: 'muted' }, 'Pas de plan de ravitaillement pour cette sortie.'));
-  } else {
-    // Comparaison principale : grammes pris / grammes prévus jusqu'au point atteint.
+  // Chaque prise atteinte est « faite » par défaut ; décocher celles non prises
+  // met à jour les grammes et le g/h (enregistré dans la sortie).
+  const nutritionCard = el('section', { class: 'card' });
+  const summaryBox = el('div', {});
+
+  function renderTotals(): void {
+    if (!nut) return;
+    const n = summarizeNutrition(nut, movingTimeS);
     const ratio = n.plannedG > 0 ? Math.round((n.takenG / n.plannedG) * 100) : null;
-    append(
-      nutritionCard,
+    summaryBox.replaceChildren(
       el(
         'div',
         { class: `plan-summary${ratio !== null && ratio < 75 ? ' warn' : ''}` },
         el('div', { class: 'plan-total' }, `${int(n.takenG)} g de glucides pris`),
-        el(
-          'div',
-          {},
-          `sur ${int(n.plannedG)} g prévus jusqu’où tu es allé${ratio !== null ? ` (${ratio} %)` : ''} · plan complet : ${int(nut.plan.plannedTotalG)} g`,
-        ),
+        el('div', {}, `sur ${int(n.plannedG)} g prévus jusqu’où tu es allé${ratio !== null ? ` (${ratio} %)` : ''} · plan complet : ${int(nut.plan.plannedTotalG)} g`),
         el(
           'div',
           {},
@@ -115,31 +106,50 @@ export const rideSummaryView: View = async (root, params) => {
       el(
         'div',
         { class: 'route-card-stats' },
-        el('span', {}, el('strong', {}, `${n.done}`), ' faites'),
-        el('span', {}, el('strong', {}, `${n.postponed}`), ' repoussées'),
-        el('span', {}, el('strong', {}, `${n.skipped}`), ' passées'),
-        n.missed > 0 ? el('span', {}, el('strong', {}, `${n.missed}`), ' non traitées') : null,
+        el('span', {}, el('strong', {}, `${n.taken}`), ' prises'),
+        n.notTaken > 0 ? el('span', {}, el('strong', {}, `${n.notTaken}`), ' pas prises') : null,
         n.notReached > 0 ? el('span', {}, el('strong', {}, `${n.notReached}`), ' non atteintes') : null,
       ),
-      el(
-        'ol',
-        { class: 'intake-list' },
-        ...nut.plan.intakes.map((i, k) => {
-          const st = nut.states[k];
-          return el(
-            'li',
-            { class: `intake status-${st.status}` },
-            el('div', { class: 'intake-km' }, `Km ${int(i.distanceM / 1000)}`),
-            el(
-              'div',
-              { class: 'intake-body' },
-              el('div', { class: 'intake-what' }, i.label, el('span', { class: 'muted' }, ` · ${fr1(i.carbsG)} g`)),
-              el('div', { class: 'intake-why' }, `${STATUS_LABELS[st.status]}${st.laterCount > 0 ? ` · repoussée ${st.laterCount}×` : ''}${st.doneAtS !== null ? ` · à ${clock(st.doneAtS)}` : ''}`),
-            ),
-          );
-        }),
-      ),
     );
+  }
+
+  if (!nut || nut.plan.intakes.length === 0) {
+    nutritionCard.append(el('h2', {}, '🍌 Bilan nutrition'), el('p', { class: 'muted' }, 'Pas de plan de ravitaillement pour cette sortie.'));
+  } else {
+    let saving: Promise<void> = Promise.resolve();
+    const rows = nut.plan.intakes.map((i, k) => {
+      const st = nut.states[k];
+      const reached = isReached(st);
+      const box = el('input', { type: 'checkbox', checked: isTaken(st), disabled: !reached, 'aria-label': `Prise du km ${int(i.distanceM / 1000)} prise` });
+      box.addEventListener('change', () => {
+        setTaken(nut, i.id, box.checked);
+        row.classList.toggle('not-taken', !box.checked);
+        renderTotals();
+        ride.nutrition = nut;
+        ride.summary = s ? { ...s, nutrition: summarizeNutrition(nut, movingTimeS) } : s;
+        saving = saving.then(() => updateRide(ride)).catch((err: unknown) => toast(errorMessage(err), 'error'));
+      });
+      const row = el(
+        'li',
+        { class: `intake intake-check${reached ? '' : ' status-pending'}${reached && !isTaken(st) ? ' not-taken' : ''}` },
+        el('label', { class: 'intake-km' }, box, el('span', {}, `Km ${int(i.distanceM / 1000)}`)),
+        el(
+          'div',
+          { class: 'intake-body' },
+          el('div', { class: 'intake-what' }, i.label, el('span', { class: 'muted' }, ` · ${fr1(i.carbsG)} g`)),
+          el('div', { class: 'intake-why' }, reached ? (st.dueAtS !== null ? `alerte à ${clock(st.dueAtS)} de temps en mouvement` : 'atteinte') : '— non atteinte'),
+        ),
+      );
+      return row;
+    });
+    append(
+      nutritionCard,
+      el('h2', {}, '🍌 Bilan nutrition'),
+      summaryBox,
+      el('p', { class: 'muted' }, 'Chaque prise est comptée comme faite. Décoche celles que tu n’as pas prises : le bilan se met à jour.'),
+      el('ol', { class: 'intake-list' }, ...rows),
+    );
+    renderTotals();
   }
 
   // ---------- Ressenti ----------

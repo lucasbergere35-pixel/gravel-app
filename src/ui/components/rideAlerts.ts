@@ -1,123 +1,132 @@
 /**
- * Bannières du mode sortie : pré-alerte de prise (discrète), alerte de prise
- * (grande, avec « Fait » / « Plus tard » / « Passer ») et rappel boisson.
+ * Bannières du mode sortie, SANS bouton :
+ *  - pré-alerte discrète ~500 m avant une prise ;
+ *  - bannière de prise (contenu, raison, son) ;
+ *  - bannière boisson (plus discrète).
+ * Elles disparaissent seules après BANNER_MS, ou plus tôt d'un simple appui.
  *
- * Les bannières de prise et de boisson sont dans la zone « prioritaire » du
- * pager, AU-DESSUS du voile du cadenas : elles restent utilisables écran
- * verrouillé. Pour éviter un appui involontaire (sacoche, pluie), quand le
- * cadenas est actif il faut MAINTENIR le bouton HOLD_MS au lieu de le toucher.
+ * Elles sont dans la zone « prioritaire » du pager, au-dessus du voile du
+ * cadenas : l'appui pour fermer marche même écran verrouillé (il ne valide rien).
+ *
+ * Écran éteint / appli en arrière-plan : une bannière n'est jamais « consommée »
+ * hors de la vue. Elle attend le retour de l'appli, puis s'affiche 40 s.
+ * Plusieurs prises arrivées pendant ce temps sont regroupées en une bannière.
  */
-import type { FrozenIntake } from '../../core/ride/intakes';
+import { describeIntakes, type FrozenIntake } from '../../core/ride/intakes';
+import type { SoundKind } from '../../services/sound';
 import { el } from '../dom';
 import { int } from '../format';
 
-const HOLD_MS = 600;
-
-export interface RideAlertsHandlers {
-  isLocked(): boolean;
-  onDone(id: string): void;
-  onLater(id: string): void;
-  onSkip(id: string): void;
-  onDrinkOk(): void;
-}
+export const BANNER_MS = 40_000;
 
 export interface RideAlerts {
-  /** Met à jour l'affichage (ne reconstruit les bannières que si elles changent). */
-  update(active: FrozenIntake | null, announced: FrozenIntake | null, drink: boolean, alongM: number | null): void;
+  /** Prises déclenchées (une ou plusieurs) : affichées ensemble. */
+  showIntakes(intakes: readonly FrozenIntake[]): void;
+  showDrink(): void;
+  /** Pré-alerte : prise annoncée (ou null), et position sur le tracé pour la distance restante. */
+  setAnnounced(intake: FrozenIntake | null, alongM: number | null): void;
+  /** À appeler quand l'appli revient au premier plan. */
+  onVisible(): void;
   destroy(): void;
 }
 
-/** Bouton qui réagit à un simple appui, ou à un appui maintenu si l'écran est verrouillé. */
-function actionButton(label: string, cls: string, isLocked: () => boolean, action: () => void): HTMLButtonElement {
-  const btn = el('button', { type: 'button', class: `btn ${cls}` }, label);
-  let timer: number | undefined;
-  const cancel = () => {
-    window.clearTimeout(timer);
-    btn.classList.remove('holding');
-  };
-  btn.addEventListener('click', () => {
-    if (!isLocked()) action();
-  });
-  btn.addEventListener('pointerdown', () => {
-    if (!isLocked()) return;
-    btn.classList.add('holding');
-    timer = window.setTimeout(() => {
-      cancel();
-      action();
-    }, HOLD_MS);
-  });
-  for (const t of ['pointerup', 'pointerleave', 'pointercancel'] as const) btn.addEventListener(t, cancel);
-  btn.addEventListener('contextmenu', (e) => e.preventDefault());
-  return btn;
+interface Banner {
+  box: HTMLElement;
+  timer: number | undefined;
+  /** Contenu en attente d'affichage (appli en arrière-plan). */
+  pending: boolean;
 }
 
-export function createRideAlerts(priority: HTMLElement, alerts: HTMLElement, h: RideAlertsHandlers): RideAlerts {
+export function createRideAlerts(priority: HTMLElement, alerts: HTMLElement, play: (kind: SoundKind) => void): RideAlerts {
   const preBar = el('div', { class: 'pre-alert', hidden: true });
   alerts.append(preBar);
-  const intakeBox = el('div', { class: 'intake-banner', hidden: true, role: 'alertdialog' });
-  const drinkBox = el('div', { class: 'drink-banner', hidden: true, role: 'alert' });
-  priority.append(intakeBox, drinkBox);
 
-  let shownIntakeId: string | null = null;
-  let shownDrink = false;
+  const intake: Banner = { box: el('div', { class: 'intake-banner', hidden: true, role: 'alert' }), timer: undefined, pending: false };
+  const drink: Banner = { box: el('div', { class: 'drink-banner', hidden: true, role: 'alert' }), timer: undefined, pending: false };
+  priority.append(intake.box, drink.box);
 
-  function renderIntake(i: FrozenIntake): void {
-    intakeBox.replaceChildren(
-      el('div', { class: 'ib-title' }, `🍌 Km ${int(i.distanceM / 1000)} : ${i.label}`),
-      el('div', { class: 'ib-why' }, `${i.reason === 'preClimb' ? '⛰ ' : ''}${i.why} · ${int(i.carbsG)} g`),
-      el(
-        'div',
-        { class: 'ib-actions' },
-        actionButton('✓ Fait', 'btn-primary ib-done', h.isLocked, () => h.onDone(i.id)),
-        actionButton('Plus tard', 'ib-later', h.isLocked, () => h.onLater(i.id)),
-        actionButton('Passer', 'ib-skip', h.isLocked, () => h.onSkip(i.id)),
-      ),
-      el('div', { class: 'ib-lock-hint' }, '🔒 Écran verrouillé : maintiens le bouton ½ seconde'),
-    );
+  /** Prises affichées (ou en attente) dans la bannière en cours. */
+  let intakeGroup: FrozenIntake[] = [];
+
+  const visible = () => document.visibilityState === 'visible';
+
+  function hide(b: Banner): void {
+    window.clearTimeout(b.timer);
+    b.box.hidden = true;
+    b.pending = false;
+    if (b === intake) intakeGroup = [];
   }
 
-  function renderDrink(): void {
-    drinkBox.replaceChildren(
-      el('span', { class: 'db-text' }, '💧 Pense à boire quelques gorgées'),
-      actionButton('OK', 'btn-small db-ok', h.isLocked, () => h.onDrinkOk()),
+  for (const b of [intake, drink]) b.box.addEventListener('click', () => hide(b));
+
+  /** Affiche la bannière pour BANNER_MS, avec une barre qui se vide. */
+  function display(b: Banner, sound: SoundKind): void {
+    if (!visible()) {
+      b.pending = true; // affichée au retour de l'appli
+      return;
+    }
+    b.pending = false;
+    window.clearTimeout(b.timer);
+    b.box.hidden = false;
+    // Relance l'animation de la barre de temps.
+    const bar = b.box.querySelector<HTMLElement>('.banner-timer');
+    if (bar) {
+      bar.style.animation = 'none';
+      void bar.offsetWidth;
+      bar.style.animation = '';
+    }
+    b.timer = window.setTimeout(() => hide(b), BANNER_MS);
+    play(sound);
+  }
+
+  function renderIntake(): void {
+    const t = describeIntakes(intakeGroup);
+    intake.box.replaceChildren(
+      el('div', { class: 'ib-title' }, `🍌 ${t.title}`),
+      ...t.lines.map((l) => el('div', { class: 'ib-why' }, l)),
+      el('div', { class: 'banner-hint' }, 'Touche pour fermer'),
+      el('div', { class: 'banner-timer' }),
     );
   }
 
   return {
-    update(active, announced, drink, alongM) {
-      // Alerte de prise (prioritaire sur la boisson)
-      if (active) {
-        if (shownIntakeId !== active.id) {
-          renderIntake(active);
-          shownIntakeId = active.id;
-        }
-        intakeBox.hidden = false;
-      } else {
-        intakeBox.hidden = true;
-        shownIntakeId = null;
-      }
-      intakeBox.classList.toggle('locked', h.isLocked());
-
-      const showDrink = drink && !active;
-      if (showDrink && !shownDrink) renderDrink();
-      shownDrink = showDrink;
-      drinkBox.hidden = !showDrink;
-      drinkBox.classList.toggle('locked', h.isLocked());
-
-      // Pré-alerte discrète
-      if (announced && !active) {
-        const left = alongM !== null ? Math.max(0, announced.distanceM - alongM) : null;
+    showIntakes(intakes) {
+      if (intakes.length === 0) return;
+      // Regroupe seulement avec des prises PAS ENCORE VUES (en attente, appli en
+      // arrière-plan). Une bannière déjà vue est remplacée par la nouvelle prise.
+      const keep = intake.pending ? intakeGroup : [];
+      intakeGroup = [...keep, ...intakes.filter((i) => !keep.some((k) => k.id === i.id))];
+      renderIntake();
+      display(intake, 'intake');
+    },
+    showDrink() {
+      drink.box.replaceChildren(
+        el('div', { class: 'db-text' }, '💧 Pense à boire quelques gorgées'),
+        el('div', { class: 'banner-hint' }, 'Touche pour fermer'),
+        el('div', { class: 'banner-timer' }),
+      );
+      display(drink, 'drink');
+    },
+    setAnnounced(next, alongM) {
+      if (next && intake.box.hidden) {
+        const left = alongM !== null ? Math.max(0, next.distanceM - alongM) : null;
         const when = left !== null ? `dans ${int(Math.round(left / 50) * 50)} m` : 'dans ~2 min';
-        preBar.textContent = `🍌 Prise ${when} : ${announced.label}`;
+        preBar.textContent = `🍌 Prise ${when} : ${next.label}`;
         preBar.hidden = false;
       } else {
         preBar.hidden = true;
       }
     },
+    onVisible() {
+      if (intake.pending) display(intake, 'intake');
+      if (drink.pending) display(drink, 'drink');
+    },
     destroy() {
+      window.clearTimeout(intake.timer);
+      window.clearTimeout(drink.timer);
       preBar.remove();
-      intakeBox.remove();
-      drinkBox.remove();
+      intake.box.remove();
+      drink.box.remove();
     },
   };
 }

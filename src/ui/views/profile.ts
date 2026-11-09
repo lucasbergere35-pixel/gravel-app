@@ -140,6 +140,7 @@ export const profileView: View = async (root) => {
     profile.complete ? null : el('div', { class: 'card notice' }, 'Complète ton profil : il sert à estimer ta dépense énergétique et ton plan nutrition.'),
     form,
     el('a', { href: '#/aliments', class: 'btn btn-block', style: 'margin-top:16px' }, '🍌 Mes aliments'),
+    el('a', { href: '#/cartes', class: 'btn btn-block', style: 'margin-top:8px' }, '🗺 Cartes hors ligne'),
     el(
       'section',
       { class: 'card stack' },

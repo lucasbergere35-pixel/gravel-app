@@ -17,6 +17,7 @@
  *  OpenTopoMap : https://opentopomap.org/about (zoom max 17)
  */
 import {
+  addProtocol,
   AttributionControl,
   LngLatBounds,
   Map as MlMap,
@@ -37,10 +38,28 @@ setWorkerUrl(workerUrl);
 import type { LayerSpecification, SourceSpecification } from '@maplibre/maplibre-gl-style-spec';
 import type { Feature, FeatureCollection } from 'geojson';
 import type { TrackPoint } from '../core/types';
+import { loadFont, loadTileForMap } from '../services/offlineMaps';
+import { GRAVEL_GLYPHS, GRAVEL_LAYER_IDS, GRAVEL_SOURCE_ID, gravelLayers, gravelSource } from './gravelStyle';
+
+/**
+ * Protocole « gcofm:// » : la carte demande ses tuiles vectorielles et ses
+ * polices ici. On sert la copie hors ligne si elle existe, sinon le réseau,
+ * sinon un contenu vide (fond uni, le tracé et la position restent affichés).
+ */
+addProtocol('gcofm', async (params, abortController) => {
+  const path = params.url.replace(/^gcofm:\/\//, '');
+  if (path.startsWith('tiles/')) return { data: await loadTileForMap(path.slice('tiles/'.length), abortController.signal) };
+  if (path.startsWith('fonts/')) {
+    const [fontstack, range] = path.slice('fonts/'.length).split('/');
+    return { data: await loadFont(decodeURIComponent(fontstack), range.replace('.pbf', ''), abortController.signal) };
+  }
+  return { data: new ArrayBuffer(0) };
+});
 
 const OSM = '© <a href="https://www.openstreetmap.org/copyright">Contributeurs OpenStreetMap</a>';
 
-const BASE_LAYERS = {
+/** Fonds raster (en ligne uniquement). Le fond « gravel » (vectoriel, hors ligne) est à part. */
+const RASTER_LAYERS = {
   cyclosm: {
     label: 'CyclOSM',
     tiles: ['a', 'b', 'c'].map((s) => `https://${s}.tile-cyclosm.openstreetmap.fr/cyclosm/{z}/{x}/{y}.png`),
@@ -55,13 +74,15 @@ const BASE_LAYERS = {
   },
 } as const;
 
-type BaseLayerKey = keyof typeof BASE_LAYERS;
+export type BaseLayerKey = 'gravel' | keyof typeof RASTER_LAYERS;
+const BASE_ORDER: BaseLayerKey[] = ['gravel', 'cyclosm', 'opentopomap'];
+const BASE_LABELS: Record<BaseLayerKey, string> = { gravel: 'Gravel', cyclosm: 'CyclOSM', opentopomap: 'OpenTopoMap' };
 const PREF_KEY = 'gc.baseLayer';
 
 function loadPreferredLayer(): BaseLayerKey {
   try {
     const v = localStorage.getItem(PREF_KEY);
-    if (v && v in BASE_LAYERS) return v as BaseLayerKey;
+    if (v && (BASE_ORDER as string[]).includes(v)) return v as BaseLayerKey;
   } catch {
     /* stockage indisponible */
   }
@@ -127,9 +148,9 @@ export type OrientationMode = 'heading' | 'north';
  * Crée la carte, ou affiche un message si c'est impossible (WebGL indisponible…).
  * Le reste de l'écran (chiffres, suivi GPS) continue de fonctionner sans carte.
  */
-export function createMapView(container: HTMLElement): MapView | null {
+export function createMapView(container: HTMLElement, options: MapViewOptions = {}): MapView | null {
   try {
-    return new MapView(container);
+    return new MapView(container, options);
   } catch (err) {
     console.error(err);
     const msg = document.createElement('div');
@@ -138,6 +159,11 @@ export function createMapView(container: HTMLElement): MapView | null {
     container.replaceChildren(msg);
     return null;
   }
+}
+
+export interface MapViewOptions {
+  /** Fond imposé au démarrage (ex. « gravel » en sortie) ; sinon le dernier choisi. */
+  base?: BaseLayerKey;
 }
 
 export class MapView {
@@ -160,12 +186,17 @@ export class MapView {
   private onFollowChange: (following: boolean) => void = () => {};
   private onOrientationToggle: () => void = () => {};
 
-  constructor(container: HTMLElement) {
-    this.baseLayer = loadPreferredLayer();
-    const sources: Record<string, SourceSpecification> = {};
-    const layers: LayerSpecification[] = [];
-    for (const key of Object.keys(BASE_LAYERS) as BaseLayerKey[]) {
-      const b = BASE_LAYERS[key];
+  constructor(container: HTMLElement, options: MapViewOptions = {}) {
+    this.baseLayer = options.base ?? loadPreferredLayer();
+    const sources: Record<string, SourceSpecification> = { [GRAVEL_SOURCE_ID]: gravelSource };
+    // Fond « gravel » vectoriel (dessous), puis fonds raster (masqués s'ils ne sont pas choisis :
+    // une couche masquée ne télécharge rien).
+    const layers: LayerSpecification[] = gravelLayers.map((l) => ({
+      ...l,
+      layout: { ...(l.layout ?? {}), visibility: this.baseLayer === 'gravel' ? 'visible' : 'none' },
+    })) as LayerSpecification[];
+    for (const key of Object.keys(RASTER_LAYERS) as (keyof typeof RASTER_LAYERS)[]) {
+      const b = RASTER_LAYERS[key];
       sources[key] = { type: 'raster', tiles: [...b.tiles], tileSize: 256, maxzoom: b.maxzoom, attribution: b.attribution };
       layers.push({ id: `base-${key}`, type: 'raster', source: key, layout: { visibility: key === this.baseLayer ? 'visible' : 'none' } });
     }
@@ -191,7 +222,7 @@ export class MapView {
 
     this.map = new MlMap({
       container,
-      style: { version: 8, sources, layers },
+      style: { version: 8, glyphs: GRAVEL_GLYPHS, sources, layers },
       center: [2.4, 46.6],
       zoom: 5,
       attributionControl: false,
@@ -209,7 +240,7 @@ export class MapView {
     this.map.addControl(new ScaleControl({ unit: 'metric' }), 'bottom-left');
     this.map.addControl(new NavigationControl({ showCompass: false }), 'top-left');
     const layerBtn = new ButtonControl('ctrl-layers', 'Changer de fond de carte', () => this.toggleBaseLayer(layerBtn.button));
-    layerBtn.button.textContent = BASE_LAYERS[this.baseLayer].label;
+    layerBtn.button.textContent = BASE_LABELS[this.baseLayer];
     this.map.addControl(layerBtn, 'top-right');
 
     this.ready = new Promise((resolve) => {
@@ -219,11 +250,11 @@ export class MapView {
   }
 
   private toggleBaseLayer(button: HTMLButtonElement): void {
-    const keys = Object.keys(BASE_LAYERS) as BaseLayerKey[];
-    const next = keys[(keys.indexOf(this.baseLayer) + 1) % keys.length];
-    for (const k of keys) this.map.setLayoutProperty(`base-${k}`, 'visibility', k === next ? 'visible' : 'none');
+    const next = BASE_ORDER[(BASE_ORDER.indexOf(this.baseLayer) + 1) % BASE_ORDER.length];
+    for (const id of GRAVEL_LAYER_IDS) this.map.setLayoutProperty(id, 'visibility', next === 'gravel' ? 'visible' : 'none');
+    for (const k of Object.keys(RASTER_LAYERS)) this.map.setLayoutProperty(`base-${k}`, 'visibility', k === next ? 'visible' : 'none');
     this.baseLayer = next;
-    button.textContent = BASE_LAYERS[next].label;
+    button.textContent = BASE_LABELS[next];
     savePreferredLayer(next);
   }
 

@@ -59,6 +59,7 @@ import { DeviceGps, type PositionSource } from '../../services/geolocation';
 import { SimulatedGps } from '../../services/simulator';
 import { AlertSound } from '../../services/sound';
 import { ScreenWakeLock } from '../../services/wakeLock';
+import { createOfflinePackCard } from '../components/offlinePackCard';
 import { createRideAlerts } from '../components/rideAlerts';
 import { createRidePager } from '../components/ridePager';
 import { createRideProfile } from '../components/rideProfile';
@@ -210,6 +211,14 @@ export function createRideView(simulated: boolean): View {
       ...[0, 15, 20, 25, 30].map((m) => el('option', { value: m, selected: m === rideSettings.drinkIntervalMin }, m === 0 ? 'Désactivé' : `Toutes les ${m} min`)),
     );
     const testSoundBtn = el('button', { type: 'button', class: 'btn btn-small' }, '🔊 Tester le son');
+    // Carte hors ligne : avertissement + bouton si elle manque pour cet itinéraire.
+    const offlineWarning = el('p', { class: 'notice-inline', hidden: true }, '⚠ Pas de carte hors ligne pour cet itinéraire : en zone blanche, le fond de carte restera vide (le tracé, ta position et les alertes fonctionnent quand même).');
+    const offlineCard = createOfflinePackCard(route.id, route.name, track.points, {
+      compact: true,
+      onChange: (pack) => (offlineWarning.hidden = pack?.status === 'complete'),
+    });
+    const offlineBox = el('div', { class: 'card stack' }, el('h2', {}, '🗺 Carte hors ligne'), offlineWarning, offlineCard.element);
+
     const alertsCard = el(
       'div',
       { class: 'card stack' },
@@ -242,6 +251,7 @@ export function createRideView(simulated: boolean): View {
             el('p', {}, 'Garde l’appli ouverte au premier plan. Si l’écran s’éteint, l’enregistrement s’interrompt et reprend au rallumage (un trait droit relie les deux points).'),
             ride ? el('p', { class: 'muted' }, 'Une sortie non terminée a été trouvée sur cet itinéraire : elle va être reprise.') : null,
           ),
+      offlineBox,
       alertsCard,
       el('p', { class: 'muted' }, 'En sortie : glisse sur le bandeau du bas (ou touche ● ○ ○) pour changer de page. 🔓 verrouille l’écran.'),
       startBtn,
@@ -525,7 +535,7 @@ export function createRideView(simulated: boolean): View {
         // Page mémorisée (ou tableau de bord) ; place la carte au bon endroit.
         mapSlotDashboard.append(mapWrap);
         pager.setPage(pager.current());
-        map = createMapView(mapEl);
+        map = createMapView(mapEl, { base: 'gravel' }); // même aspect en ligne et hors ligne
         map?.showTrack(track.points);
         map?.enableRideMode({
           orientation,
@@ -628,6 +638,7 @@ export function createRideView(simulated: boolean): View {
       stopTracking();
       void flush();
       document.body.classList.remove('ride-mode');
+      offlineCard.destroy();
       pager.destroy();
       alertsUi.destroy();
       sound.close();

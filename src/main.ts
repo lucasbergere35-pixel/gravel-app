@@ -10,6 +10,7 @@ import { el, errorMessage } from './ui/dom';
 import { startRouter } from './ui/router';
 import { foodsView } from './ui/views/foods';
 import { nutritionView } from './ui/views/nutrition';
+import { offlineMapsView } from './ui/views/offlineMaps';
 import { profileView } from './ui/views/profile';
 import { rideSummaryView, ridesListView } from './ui/views/rides';
 import { createRideView } from './ui/views/ride';
@@ -65,6 +66,7 @@ startRouter(
     { path: '/itineraire/:id', view: routeDetailView, tab: 'routes' },
     { path: '/profil', view: profileView, tab: 'profile' },
     { path: '/aliments', view: foodsView, tab: 'foods' },
+    { path: '/cartes', view: offlineMapsView, tab: 'profile' },
     { path: '/sorties', view: ridesListView, tab: 'rides' },
     { path: '/sorties/:id', view: rideSummaryView, tab: 'rides' },
     { path: '/nutrition/:id', view: nutritionView, tab: 'routes' },

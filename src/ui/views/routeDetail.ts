@@ -7,7 +7,9 @@ import { writeGpx } from '../../core/gpx/write';
 import { createMapView } from '../../map/mapView';
 import { deleteRoute, getProfile, getRoute, renameRoute } from '../../services/db';
 import { safeFileName, shareOrDownload } from '../../services/files';
+import { deletePack } from '../../services/offlineMaps';
 import { createElevationChart } from '../components/elevationChart';
+import { createOfflinePackCard } from '../components/offlinePackCard';
 import { toast } from '../components/toast';
 import { el, errorMessage } from '../dom';
 import { duration, int, km } from '../format';
@@ -78,6 +80,9 @@ export const routeDetailView: View = async (root, params) => {
     s.hasElevation && s.maxEleM !== null ? stat('Altitude max', int(s.maxEleM), ' m') : null,
   );
 
+  // --- Carte hors ligne ---
+  const offlineCard = createOfflinePackCard(meta.id, meta.name, track.points);
+
   // --- Actions ---
   const exportBtn = el('button', { type: 'button', class: 'btn btn-block' }, 'Exporter en GPX');
   exportBtn.addEventListener('click', async () => {
@@ -105,6 +110,7 @@ export const routeDetailView: View = async (root, params) => {
     window.clearTimeout(confirmTimer);
     try {
       await deleteRoute(meta.id);
+      await deletePack(meta.id).catch(() => {}); // libère aussi la carte hors ligne
       toast('Itinéraire supprimé', 'success');
       navigate('/');
     } catch (err) {
@@ -120,6 +126,7 @@ export const routeDetailView: View = async (root, params) => {
     elevationProfile
       ? el('section', { class: 'card' }, el('h2', {}, 'Profil altimétrique'))
       : el('p', { class: 'muted' }, 'Ce GPX ne contient pas d’altitude : dénivelé et profil indisponibles.'),
+    el('section', { class: 'card' }, el('h2', {}, '🗺 Carte hors ligne'), offlineCard.element),
     el(
       'div',
       { class: 'stack actions' },
@@ -145,6 +152,7 @@ export const routeDetailView: View = async (root, params) => {
   if (chart) root.querySelector('section.card')?.append(chart.element);
 
   return () => {
+    offlineCard.destroy();
     window.clearTimeout(confirmTimer);
     chart?.destroy();
     map?.destroy();

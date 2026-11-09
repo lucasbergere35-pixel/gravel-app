@@ -61,9 +61,12 @@ src/
                        prise, compté dès l'affichage (markDrink) ; describeIntakes (texte, regroupement « N prises à
                        rattraper ») ; summarizeNutrition (g/h seulement si ≥ 15 min couvertes)
     ride/summary.ts    bilan (D+ GPS lissé, vitesse moyenne), ressenti (bonne / coup de mou / fringale + km), GPX de la sortie
+    offline/tiles.ts   tuiles d'un itinéraire : z5–8 rectangle englobant, z9–11 couloir ±8 km, z12–14 couloir ±2 km
+                       (couloir réduit ±5/±1 km si trop gros) ; ordre = vue d'ensemble puis le long du parcours ;
+                       limites OpenFreeMap OFM_MAX_TILES 3000 / OFM_MAX_BYTES 50 Mo / 4 en parallèle ; tilesToDelete (dédup)
     backup.ts          format JSON de sauvegarde (app, version, stores), parseBackup (vérifie tout avant d'écrire), describeBackup
   services/    accès aux API du navigateur
-    db.ts              IndexedDB v2 : routes, routeTracks, settings (clés 'profile', 'foods', 'nutritionPrefs' = objectif g/h + bonus montée,
+    db.ts              IndexedDB v3 (+ tiles, offlinePacks, mapAssets) : routes, routeTracks, settings (clés 'profile', 'foods', 'nutritionPrefs' = objectif g/h + bonus montée,
                        'rideSettings' = son + intervalle boisson) ; RideMeta.nutrition (plan figé + états), .summary, .feeling, rides (résumé), ridePoints (positions
                        filtrées, ajout par lots) ; dumpAll / restoreAll (FUSION par identifiant, une transaction, positions
                        d'une sortie remplacées pour éviter les doublons)
@@ -71,12 +74,20 @@ src/
     geolocation.ts     PositionSource + DeviceGps (watchPosition haute précision, relancé au retour premier plan)
     simulator.ts       SimulatedGps : rejoue un itinéraire (bruit, points imprécis, arrêt km 1, écart 80 m km 2, trou km 3),
                        altitude simulée depuis le profil
+    offlineMaps.ts     cartes hors ligne : TileJSON OpenFreeMap (URL versionnée chaque semaine, mémorisée), téléchargement
+                       reprenable (seules les tuiles absentes), arrêt net aux limites (statut 'limit'), polices Noto Sans
+                       (mapAssets), loadTileForMap (copie locale → réseau SANS stocker → tuile vide), deletePack (dédup),
+                       storageInfo / requestPersistence ; gestionnaire global (le téléchargement continue si on change d'écran)
     sound.ts           AlertSound (Web Audio, sons « prise » et « boisson » ; unlock() pendant l'appui sur Démarrer)
     wakeLock.ts        ScreenWakeLock (redemandé au retour au premier plan)
-  map/mapView.ts       MapView (MapLibre) + createMapView (message si WebGL indisponible) ; mode sortie : flèche (Marker rotationAlignment map), boussole (tap = bascule), « sens de la marche » (bearing = cap, position au tiers bas via padding top = h/3) ou « nord en haut », trace bleue regroupée toutes les 2 s, suivi/recentrer ; en dev, `window.__gcMap`
+  map/gravelStyle.ts   style « Gravel » maison (OpenMapTiles) : goudronné blanc/jaune/orange bordé gris, non revêtu brun tireté
+                       épais (track ou surface=unpaved), sentiers pointillés, cyclables bleu, points d'eau (poi drinking_water),
+                       noms de lieux ; source « gcofm://tiles/… », polices « gcofm://fonts/… »
+  map/mapView.ts       MapView (MapLibre) + createMapView({ base }) ; protocole gcofm (addProtocol) ; fonds : gravel (vectoriel,
+                       hors ligne) / CyclOSM / OpenTopoMap (raster, en ligne) ; sortie = « gravel » imposé (message si WebGL indisponible) ; mode sortie : flèche (Marker rotationAlignment map), boussole (tap = bascule), « sens de la marche » (bearing = cap, position au tiers bas via padding top = h/3) ou « nord en haut », trace bleue regroupée toutes les 2 s, suivi/recentrer ; en dev, `window.__gcMap`
   ui/
     router.ts          routeur par hash (#/, #/itineraire/:id, #/nutrition/:id, #/profil, #/aliments, #/sortie/:id, #/simulation/:id,
-                       #/sorties, #/sorties/:id)
+                       #/sorties, #/sorties/:id, #/cartes)
     help.ts            textes réutilisés (avertissement médical, aide sauvegarde)
     pager.ts           logique pure de pagination (glissement, page mémorisée) — testée
     views/             écrans ; ride.ts = mode sortie (masque en-tête et onglets via body.ride-mode) en 3 pages :
@@ -123,10 +134,12 @@ Déploiement : `git push` sur `main` → GitHub Actions → https://lucasbergere
 - Service worker (Workbox) : précache de TOUTE l'appli (html, js, css, worker MapLibre .mjs, icônes, manifest) + navigation →
   index.html. L'appli démarre en mode Avion si elle a été ouverte une fois en ligne depuis la dernière mise à jour.
 - Données (IndexedDB), GPS, calculs, alertes, sons, import/export de fichiers : fonctionnent sans réseau.
-- Fonds de carte (tuiles raster CyclOSM/OpenTopoMap) : PAS mis en cache par l'appli (conditions d'utilisation) ; seul le cache
-  HTTP du navigateur peut en garder quelques-unes. Hors ligne : fond gris, mais tracé, position et trace restent affichés.
-- Cartes hors ligne : non faites. Piste privilégiée : tuiles VECTORIELLES (OpenFreeMap ou extrait PMTiles Protomaps) téléchargées
-  autour de l'itinéraire dans IndexedDB, servies à MapLibre via addProtocol. Ne pas télécharger en masse les tuiles OSM/CyclOSM/OTM.
+- Fond « Gravel » : tuiles OpenFreeMap téléchargées par itinéraire (bouton « ⬇ Carte hors ligne ») → affiché sans réseau.
+  Tuiles vues en ligne sans téléchargement : NON stockées (conditions OpenFreeMap). CyclOSM/OpenTopoMap : en ligne seulement,
+  jamais téléchargés en masse (conditions OSM France / OpenTopoMap).
+- Conditions OpenFreeMap (https://openfreemap.org/tos/, lues en nov. 2026) : ≤ 3 000 tuiles ou 50 Mo par téléchargement, ≤ 4 requêtes
+  parallèles, User-Agent unique — ce dernier point est impossible depuis une appli web (Safari interdit de changer le User-Agent ;
+  l'en-tête Origin identifie le site). Ne pas contourner les limites en enchaînant plusieurs téléchargements pour un même itinéraire.
 
 ## Feuille de route
 - [x] Étape 1 : projet, import GPX, carte, stats, profil altimétrique, liste (renommer/supprimer), export GPX, PWA, déploiement

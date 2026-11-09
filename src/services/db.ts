@@ -21,7 +21,7 @@ import { DEFAULT_DRINK_INTERVAL_S, type RideNutritionState } from '../core/ride/
 import type { RideFeeling, RideSummary } from '../core/ride/summary';
 
 const DB_NAME = 'gravel-compagnon';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 export interface RouteMeta {
   id: string;
@@ -96,11 +96,41 @@ interface GravelDB extends DBSchema {
   settings: { key: string; value: unknown };
   rides: { key: string; value: RideMeta; indexes: { byStartedAt: number } };
   ridePoints: { key: number; value: RidePoint; indexes: { byRide: string } };
+  /** Tuiles de carte hors ligne, clé « z/x/y » (une seule copie, partagée entre cartes). */
+  tiles: { key: string; value: StoredTile };
+  /** Cartes hors ligne téléchargées, une par itinéraire. */
+  offlinePacks: { key: string; value: OfflinePack };
+  /** Petits fichiers permanents de la carte (polices des noms de lieux). */
+  mapAssets: { key: string; value: StoredTile };
+}
+
+export interface StoredTile {
+  key: string;
+  data: ArrayBuffer;
+  bytes: number;
+}
+
+export interface OfflinePack {
+  routeId: string;
+  routeName: string;
+  /** Tuiles de la carte, dans l'ordre de téléchargement. */
+  keys: string[];
+  /** Taille (octets) de chaque tuile de `keys` ; -1 = pas encore téléchargée. */
+  sizes: number[];
+  /** Nombre de tuiles déjà présentes (mis à jour pendant le téléchargement). */
+  done: number;
+  status: 'partial' | 'complete' | 'limit';
+  /** Couloir réduit (itinéraire long). */
+  narrow: boolean;
+  estimatedBytes: number;
+  createdAt: number;
+  updatedAt: number;
 }
 
 let dbPromise: Promise<IDBPDatabase<GravelDB>> | null = null;
 
-function db(): Promise<IDBPDatabase<GravelDB>> {
+/** Accès à la base (aussi utilisé par services/offlineMaps.ts). */
+export function db(): Promise<IDBPDatabase<GravelDB>> {
   if (!dbPromise) {
     dbPromise = openDB<GravelDB>(DB_NAME, DB_VERSION, {
       upgrade(database, oldVersion) {
@@ -116,7 +146,12 @@ function db(): Promise<IDBPDatabase<GravelDB>> {
           const pts = database.createObjectStore('ridePoints', { autoIncrement: true });
           pts.createIndex('byRide', 'rideId');
         }
-        // if (oldVersion < 3) { ... } ← prochaines évolutions ici
+        if (oldVersion < 3) {
+          if (!database.objectStoreNames.contains('tiles')) database.createObjectStore('tiles', { keyPath: 'key' });
+          if (!database.objectStoreNames.contains('offlinePacks')) database.createObjectStore('offlinePacks', { keyPath: 'routeId' });
+          if (!database.objectStoreNames.contains('mapAssets')) database.createObjectStore('mapAssets', { keyPath: 'key' });
+        }
+        // if (oldVersion < 4) { ... } ← prochaines évolutions ici
       },
       blocking() {
         // Une nouvelle version de l'appli (autre onglet) veut mettre la base à jour.

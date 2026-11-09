@@ -820,13 +820,130 @@ body.ride-mode main {
 }
 .ride-controls {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 6px;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 5px;
 }
 .ctrl-btn {
   min-height: 52px;
-  padding: 4px;
+  padding: 2px;
+  font-size: 13px;
+  line-height: 1.15;
+}
+
+/* ---------- Ravitaillement en sortie ---------- */
+/* Zone prioritaire : AU-DESSUS du voile du cadenas (z-index 3000). */
+.ride-priority {
+  position: fixed;
+  left: calc(8px + var(--safe-left));
+  right: calc(8px + var(--safe-right));
+  top: calc(var(--safe-top) + 6px);
+  z-index: 3500;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+.ride-priority > * {
+  pointer-events: auto;
+}
+.pre-alert {
+  background: #fff;
+  border: 2px solid #ef6c00;
+  color: #5d4037;
+  font-size: 17px;
+  font-weight: 800;
+  text-align: center;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  box-shadow: 0 3px 10px #0003;
+}
+.intake-banner {
+  background: #fff3e0;
+  border: 4px solid #ef6c00;
+  border-radius: 18px;
+  padding: 12px;
+  box-shadow: 0 8px 28px #0007;
+  animation: pop 0.25s ease-out;
+}
+@keyframes pop {
+  from {
+    transform: scale(0.95);
+    opacity: 0;
+  }
+}
+.ib-title {
+  font-size: 26px;
+  font-weight: 900;
+  line-height: 1.15;
+}
+.ib-why {
+  font-size: 18px;
+  font-weight: 700;
+  color: #5d4037;
+  margin: 6px 0 10px;
+}
+.ib-actions {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr;
+  gap: 8px;
+}
+.ib-actions .btn {
+  min-height: 64px;
+  font-size: 18px;
+  padding: 6px;
+}
+.ib-done {
+  font-size: 24px !important;
+}
+.ib-lock-hint {
+  display: none;
+  margin-top: 8px;
   font-size: 15px;
+  font-weight: 700;
+  text-align: center;
+}
+.intake-banner.locked .ib-lock-hint {
+  display: block;
+}
+.drink-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: #e3f2fd;
+  border: 3px solid #1e88e5;
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  font-size: 18px;
+  font-weight: 800;
+  box-shadow: 0 4px 14px #0004;
+}
+.db-ok {
+  min-width: 90px;
+  min-height: 52px;
+  font-size: 18px;
+}
+/* Bouton à maintenir (écran verrouillé) : remplissage pendant l'appui. */
+.btn.holding {
+  background-image: linear-gradient(to right, #66bb6a88 0 100%);
+  background-size: 0% 100%;
+  background-repeat: no-repeat;
+  animation: hold-fill 0.6s linear forwards;
+}
+@keyframes hold-fill {
+  to {
+    background-size: 100% 100%;
+  }
+}
+.intake.status-done {
+  border-color: var(--success);
+}
+.intake.status-skipped,
+.intake.status-due {
+  border-color: var(--danger);
+}
+.intake.status-pending {
+  opacity: 0.6;
 }
 
 /* Page 3 : profil. */

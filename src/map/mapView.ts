@@ -251,7 +251,8 @@ export class MapView {
   }
 
   fitTrack(): void {
-    if (this.destroyed || !this.trackBounds) return;
+    // En sortie, une fois la position connue, on reste centré sur elle (zoom conservé).
+    if (this.destroyed || !this.trackBounds || this.lastPos) return;
     this.map.fitBounds(this.trackBounds, { padding: 24, animate: false, maxZoom: 16 });
   }
 

@@ -24,6 +24,12 @@ export interface RidePager {
   pages: HTMLElement[];
   /** Zone d'alertes, visible sur toutes les pages. */
   alerts: HTMLElement;
+  /**
+   * Zone « prioritaire » (prises, boisson) : au-dessus du voile du cadenas,
+   * ses boutons restent utilisables même écran verrouillé.
+   */
+  priority: HTMLElement;
+  isLocked(): boolean;
   current(): number;
   setPage(index: number): void;
   setBand(speed: string, distance: string): void;
@@ -67,7 +73,8 @@ export function createRidePager(pageTitles: string[], onPageChange: (index: numb
     el('div', { class: 'lock-badge' }, el('strong', {}, '🔒 Écran verrouillé'), el('span', {}, 'Maintiens le doigt 1 s n’importe où pour déverrouiller'), progress),
   );
 
-  const element = el('div', { class: 'ride-shell' }, pagesArea, band, lockOverlay);
+  const priority = el('div', { class: 'ride-priority', 'aria-live': 'assertive' });
+  const element = el('div', { class: 'ride-shell' }, pagesArea, band, lockOverlay, priority);
 
   // ---------- Pages ----------
   let page = 0;
@@ -135,6 +142,8 @@ export function createRidePager(pageTitles: string[], onPageChange: (index: numb
     element,
     pages,
     alerts,
+    priority,
+    isLocked: () => !lockOverlay.hidden,
     current: () => page,
     setPage,
     setBand(speed, distance) {

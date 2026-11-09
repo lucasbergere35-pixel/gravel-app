@@ -11,6 +11,8 @@
  * La vitesse varie un peu autour de la vitesse choisie.
  */
 import { pointAtDistance } from '../core/geo/track';
+import { elevationAt } from '../core/geo/climbs';
+import type { ElevationProfile } from '../core/geo/elevation';
 import type { GpsFix } from '../core/gps/types';
 import type { TrackPoint } from '../core/types';
 import type { PositionSource } from './geolocation';
@@ -21,6 +23,8 @@ export interface SimulationOptions {
   speedKmh: number;
   /** Facteur d'accélération du temps (10 = 10 s simulées par seconde réelle). */
   timeFactor: number;
+  /** Profil de l'itinéraire : fournit une altitude GPS simulée (± 2 m de bruit). */
+  elevation?: ElevationProfile | null;
 }
 
 export class SimulatedGps implements PositionSource {
@@ -81,7 +85,7 @@ export class SimulatedGps implements PositionSource {
       lat: p.lat + north / M_PER_DEG,
       lon: p.lon + east / (M_PER_DEG * cosLat),
       accuracy: bad ? 60 : 5 + Math.random() * 4,
-      altitude: null,
+      altitude: this.options.elevation ? elevationAt(this.options.elevation, this.along) + (Math.random() - 0.5) * 4 : null,
       speed,
       time: this.simTime,
     });

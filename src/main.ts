@@ -11,12 +11,14 @@ import { startRouter } from './ui/router';
 import { foodsView } from './ui/views/foods';
 import { nutritionView } from './ui/views/nutrition';
 import { profileView } from './ui/views/profile';
+import { rideSummaryView, ridesListView } from './ui/views/rides';
 import { createRideView } from './ui/views/ride';
 import { routeDetailView } from './ui/views/routeDetail';
 import { routesListView } from './ui/views/routesList';
 
 const TABS = [
   { id: 'routes', href: '#/', label: 'Itinéraires', icon: '🗺️' },
+  { id: 'rides', href: '#/sorties', label: 'Sorties', icon: '🚴' },
   { id: 'foods', href: '#/aliments', label: 'Aliments', icon: '🍌' },
   { id: 'profile', href: '#/profil', label: 'Profil', icon: '👤' },
 ] as const;
@@ -63,6 +65,8 @@ startRouter(
     { path: '/itineraire/:id', view: routeDetailView, tab: 'routes' },
     { path: '/profil', view: profileView, tab: 'profile' },
     { path: '/aliments', view: foodsView, tab: 'foods' },
+    { path: '/sorties', view: ridesListView, tab: 'rides' },
+    { path: '/sorties/:id', view: rideSummaryView, tab: 'rides' },
     { path: '/nutrition/:id', view: nutritionView, tab: 'routes' },
     { path: '/sortie/:id', view: createRideView(false), tab: 'routes' },
     { path: '/simulation/:id', view: createRideView(true), tab: 'routes' },

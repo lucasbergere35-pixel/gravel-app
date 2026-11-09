@@ -21,6 +21,24 @@ import { cumulativeDistances } from '../../core/geo/distance';
 import { buildElevationProfile, cumulativeClimb, remainingClimb } from '../../core/geo/elevation';
 import { RouteMatcher, type MatchResult } from '../../core/geo/trackMatch';
 import { GpsFilter } from '../../core/gps/filter';
+import { FIRST_INTAKE_S } from '../../core/nutrition/plan';
+import { computeRouteNutrition, type RouteNutrition } from '../../core/nutrition/routePlan';
+import {
+  activeIntake,
+  announcedIntake,
+  drinkDue,
+  freezePlan,
+  initNutritionState,
+  markDone,
+  markDrink,
+  markLater,
+  markSkipped,
+  summarizeNutrition,
+  updateIntakes,
+  type RideNutritionState,
+  type RidePosition,
+} from '../../core/ride/intakes';
+import { buildRideSummary } from '../../core/ride/summary';
 import { HeadingEstimator } from '../../core/gps/heading';
 import type { GpsFix } from '../../core/gps/types';
 import { RideTracker, STALE_FIX_S } from '../../core/ride/tracker';
@@ -30,15 +48,21 @@ import {
   createRide,
   deleteRide,
   getActiveRide,
+  getFoods,
+  getNutritionPrefs,
   getProfile,
+  getRideSettings,
   getRidePoints,
   getRoute,
+  saveRideSettings,
   updateRide,
   type RideMeta,
 } from '../../services/db';
 import { DeviceGps, type PositionSource } from '../../services/geolocation';
 import { SimulatedGps } from '../../services/simulator';
+import { AlertSound } from '../../services/sound';
 import { ScreenWakeLock } from '../../services/wakeLock';
+import { createRideAlerts } from '../components/rideAlerts';
 import { createRidePager } from '../components/ridePager';
 import { createRideProfile } from '../components/rideProfile';
 import { toast } from '../components/toast';
@@ -71,7 +95,13 @@ const fmt1 = (n: number) => n.toLocaleString('fr-FR', { maximumFractionDigits: 1
 
 export function createRideView(simulated: boolean): View {
   return async (root, params) => {
-    const [data, profile] = await Promise.all([getRoute(params.id), getProfile()]);
+    const [data, profile, foods, nutritionPrefs, rideSettings] = await Promise.all([
+      getRoute(params.id),
+      getProfile(),
+      getFoods(),
+      getNutritionPrefs(),
+      getRideSettings(),
+    ]);
     if (!data) {
       toast('Itinéraire introuvable', 'error');
       navigate('/');
@@ -117,6 +147,7 @@ export function createRideView(simulated: boolean): View {
 
     const orientBtn = el('button', { type: 'button', class: 'btn ctrl-btn' });
     const wakeBtn = el('button', { type: 'button', class: 'btn ctrl-btn' }, 'Écran : NON');
+    const soundBtn = el('button', { type: 'button', class: 'btn ctrl-btn' });
     const finishBtn = el('button', { type: 'button', class: 'btn btn-danger ctrl-btn' }, 'Terminer');
     const quitLink = el('a', { href: `#/itineraire/${encodeURIComponent(route.id)}`, class: 'btn ctrl-btn' }, 'Quitter');
     const mapSlotDashboard = el('div', { class: 'map-slot map-slot-dashboard' });
@@ -139,7 +170,7 @@ export function createRideView(simulated: boolean): View {
     pager.pages[0].append(
       mapSlotDashboard,
       el('div', { class: 'ride-grid' }, tLeft.node, tClimbLeft.node, tAvg.node, tMoving.node, tTotal.node, tGps.node),
-      el('div', { class: 'ride-controls' }, orientBtn, wakeBtn, finishBtn, quitLink),
+      el('div', { class: 'ride-controls' }, orientBtn, wakeBtn, soundBtn, finishBtn, quitLink),
     );
     pager.pages[1].append(mapSlotFull);
     pager.pages[2].append(
@@ -157,6 +188,43 @@ export function createRideView(simulated: boolean): View {
       el('option', { value: '30' }, 'Accéléré ×30'),
     );
     const startBtn = el('button', { type: 'button', class: 'btn btn-primary btn-block btn-huge' }, ride ? '▶ Reprendre la sortie' : '▶ Démarrer');
+
+    // Plan nutrition : celui de l'écran « Plan nutrition », figé au démarrage.
+    // (Pour une sortie reprise, on garde celui figé au départ.)
+    const resumedNutrition = ride?.nutrition ?? null;
+    let routeNutrition: RouteNutrition | null = null;
+    if (!resumedNutrition) {
+      try {
+        routeNutrition = computeRouteNutrition(track.points, profile, nutritionPrefs, foods);
+      } catch (err) {
+        console.error(err);
+      }
+    }
+    const planLine = resumedNutrition
+      ? `Plan figé au départ : ${resumedNutrition.plan.intakes.length} prises, ${resumedNutrition.states.filter((x) => x.status === 'done').length} déjà faites.`
+      : routeNutrition && routeNutrition.plan.intakes.length > 0
+        ? `${routeNutrition.plan.intakes.length} prises, ${routeNutrition.plan.plannedTotalG} g de glucides (${routeNutrition.during.targetGPerH} g/h). Le plan sera figé au démarrage.`
+        : `Pas de prise prévue${routeNutrition?.plan.emptyReason ? ` : ${routeNutrition.plan.emptyReason}` : '.'}`;
+
+    const soundCheck = el('input', { type: 'checkbox', id: 'ride-sound', checked: rideSettings.sound });
+    const drinkSelect = el(
+      'select',
+      { id: 'ride-drink', class: 'select' },
+      ...[0, 15, 20, 25, 30].map((m) => el('option', { value: m, selected: m === rideSettings.drinkIntervalMin }, m === 0 ? 'Désactivé' : `Toutes les ${m} min`)),
+    );
+    const testSoundBtn = el('button', { type: 'button', class: 'btn btn-small' }, '🔊 Tester le son');
+    const alertsCard = el(
+      'div',
+      { class: 'card stack' },
+      el('h2', {}, '🍌 Ravitaillement'),
+      el('p', {}, planLine),
+      el('a', { href: `#/nutrition/${encodeURIComponent(route.id)}`, class: 'muted' }, 'Voir / modifier le plan nutrition'),
+      el('label', { class: 'pack-item' }, soundCheck, el('span', {}, 'Son des alertes'), el('span', {}, '')),
+      el('div', {}, testSoundBtn),
+      el('label', { for: 'ride-drink', class: 'field-label' }, '💧 Rappel boisson (temps en mouvement)'),
+      drinkSelect,
+      el('p', { class: 'notice-inline' }, '⚠ Le bouton silencieux de l’iPhone (sur le côté) coupe le son de l’appli : laisse-le côté « son » (pas d’orange visible) et monte le volume.'),
+    );
     const intro = el(
       'div',
       { class: 'ride-intro' },
@@ -167,7 +235,7 @@ export function createRideView(simulated: boolean): View {
         ? el(
             'div',
             { class: 'card stack' },
-            el('p', {}, `Rejoue l’itinéraire à ${int(profile.avgSpeedKmh)} km/h avec un arrêt au km 1, un écart de 80 m au km 2 et une coupure GPS au km 3. Rien n’est conservé.`),
+            el('p', {}, `Rejoue l’itinéraire à ${int(profile.avgSpeedKmh)} km/h avec un arrêt au km 1, un écart de 80 m au km 2 et une coupure GPS au km 3. La sortie simulée apparaît ensuite dans « Mes sorties » (tu peux la supprimer).`),
             el('label', { for: 'sim-factor', class: 'field-label' }, 'Vitesse de la simulation'),
             factorSelect,
           )
@@ -177,6 +245,7 @@ export function createRideView(simulated: boolean): View {
             el('p', {}, 'Garde l’appli ouverte au premier plan. Si l’écran s’éteint, l’enregistrement s’interrompt et reprend au rallumage (un trait droit relie les deux points).'),
             ride ? el('p', { class: 'muted' }, 'Une sortie non terminée a été trouvée sur cet itinéraire : elle va être reprise.') : null,
           ),
+      alertsCard,
       el('p', { class: 'muted' }, 'En sortie : glisse sur le bandeau du bas (ou touche ● ○ ○) pour changer de page. 🔓 verrouille l’écran.'),
       startBtn,
     );
@@ -210,6 +279,81 @@ export function createRideView(simulated: boolean): View {
     let confirmTimer: number | undefined;
     let map: MapView | null = null;
     let stopped = false;
+    let nut: RideNutritionState | null = null;
+    let drinkWasDue = false;
+    let lastPos: RidePosition = { alongM: null, onTrack: false, movingTimeS: 0 };
+    const sound = new AlertSound(rideSettings.sound);
+
+    function saveSettings(): void {
+      void saveRideSettings(rideSettings).catch((err: unknown) => toast(errorMessage(err), 'error'));
+    }
+    function refreshSoundBtn(): void {
+      soundBtn.textContent = rideSettings.sound ? '🔊 Son' : '🔇 Muet';
+      soundBtn.classList.toggle('btn-on', rideSettings.sound);
+    }
+    refreshSoundBtn();
+    soundCheck.addEventListener('change', () => {
+      rideSettings.sound = soundCheck.checked;
+      sound.enabled = rideSettings.sound;
+      refreshSoundBtn();
+      saveSettings();
+    });
+    soundBtn.addEventListener('click', () => {
+      rideSettings.sound = !rideSettings.sound;
+      sound.enabled = rideSettings.sound;
+      if (rideSettings.sound) {
+        sound.unlock();
+        sound.play('drink');
+      }
+      refreshSoundBtn();
+      saveSettings();
+    });
+    drinkSelect.addEventListener('change', () => {
+      rideSettings.drinkIntervalMin = Number(drinkSelect.value);
+      saveSettings();
+    });
+    testSoundBtn.addEventListener('click', () => {
+      sound.unlock();
+      sound.play('intake', true);
+      window.setTimeout(() => sound.play('drink', true), 1600);
+    });
+
+    /** Enregistre l'état des prises (dans la file d'écriture, sans conflit). */
+    function saveNutrition(): void {
+      if (!ride || !nut) return;
+      ride.nutrition = nut;
+      const target = ride;
+      flushing = flushing.then(() => updateRide(target)).catch((err: unknown) => console.error(err));
+    }
+
+    const alertsUi = createRideAlerts(pager.priority, pager.alerts, {
+      isLocked: () => pager.isLocked(),
+      onDone: (id) => {
+        if (!nut) return;
+        markDone(nut, id, lastPos.movingTimeS);
+        saveNutrition();
+        render();
+      },
+      onLater: (id) => {
+        if (!nut) return;
+        markLater(nut, id, lastPos);
+        saveNutrition();
+        render();
+      },
+      onSkip: (id) => {
+        if (!nut) return;
+        markSkipped(nut, id);
+        saveNutrition();
+        render();
+      },
+      onDrinkOk: () => {
+        if (!nut) return;
+        markDrink(nut, lastPos.movingTimeS);
+        drinkWasDue = false;
+        saveNutrition();
+        render();
+      },
+    });
 
     const wakeLock = new ScreenWakeLock((activeLock) => {
       if (!ScreenWakeLock.supported) return;
@@ -320,6 +464,23 @@ export function createRideView(simulated: boolean): View {
       }
       offTrackBanner.hidden = !offTrack;
       if (offTrack && lastMatch) offTrackBanner.textContent = `⚠ Hors tracé : ${int(lastMatch.offTrackM)} m`;
+
+      // Ravitaillement : position sur le tracé si on y est, sinon temps estimé.
+      if (nut) {
+        const fresh = age <= STALE_FIX_S;
+        lastPos = {
+          alongM: lastMatch && fresh ? lastMatch.alongM : null,
+          onTrack: lastMatch !== null && fresh && !offTrack,
+          movingTimeS: snap.movingTimeS,
+        };
+        const events = updateIntakes(nut, lastPos);
+        if (events.length > 0) saveNutrition();
+        if (events.some((e) => e.kind === 'due')) sound.play('intake');
+        const drink = drinkDue(nut, snap.movingTimeS);
+        if (drink && !drinkWasDue) sound.play('drink');
+        drinkWasDue = drink;
+        alertsUi.update(activeIntake(nut), announcedIntake(nut), drink, lastPos.onTrack ? lastPos.alongM : null);
+      }
     }
 
     function onFix(fix: GpsFix): void {
@@ -353,23 +514,34 @@ export function createRideView(simulated: boolean): View {
         void flush();
       } else if (source && !stopped) {
         source.restart();
+        sound.resume();
         void wakeLock.handleVisible();
         render();
       }
     }
 
     async function start(): Promise<void> {
+      sound.unlock(); // doit se faire pendant l'appui sur « Démarrer » (iOS)
       startBtn.disabled = true;
       try {
         source = simulated
-          ? new SimulatedGps(track.points, cum, { speedKmh: profile.avgSpeedKmh, timeFactor: Number(factorSelect.value) })
+          ? new SimulatedGps(track.points, cum, { speedKmh: profile.avgSpeedKmh, timeFactor: Number(factorSelect.value), elevation })
           : new DeviceGps();
 
         if (!ride) {
           // Une autre sortie restée ouverte (autre itinéraire) est clôturée.
           const other = await getActiveRide();
           if (other && !other.simulated) await updateRide({ ...other, endedAt: Date.now() });
-          ride = await createRide({ routeId: route.id, routeName: route.name, startedAt: source.now(), simulated });
+          nut = routeNutrition
+            ? initNutritionState(freezePlan(routeNutrition.plan, routeNutrition.during.targetGPerH), rideSettings.drinkIntervalMin * 60)
+            : initNutritionState({ intakes: [], targetGPerH: 0, plannedTotalG: 0, fuelStartS: FIRST_INTAKE_S, frozenAt: Date.now() }, rideSettings.drinkIntervalMin * 60);
+          ride = await createRide({ routeId: route.id, routeName: route.name, startedAt: source.now(), simulated, nutrition: nut });
+        } else {
+          nut =
+            resumedNutrition ??
+            initNutritionState({ intakes: [], targetGPerH: 0, plannedTotalG: 0, fuelStartS: FIRST_INTAKE_S, frozenAt: Date.now() }, rideSettings.drinkIntervalMin * 60);
+          nut.drinkIntervalS = rideSettings.drinkIntervalMin * 60;
+          ride.nutrition = nut;
         }
         tracker = new RideTracker(ride.startedAt);
 
@@ -448,11 +620,18 @@ export function createRideView(simulated: boolean): View {
       stopTracking();
       try {
         await flush();
-        if (ride) {
-          if (ride.simulated) await deleteRide(ride.id);
-          else await updateRide({ ...ride, endedAt: source?.now() ?? Date.now() });
+        await flushing;
+        if (ride && snap) {
+          const fixes = await getRidePoints(ride.id);
+          ride.summary = buildRideSummary(fixes, snap, nut ? summarizeNutrition(nut, snap.movingTimeS) : null);
+          if (nut) ride.nutrition = nut;
+          ride.distanceM = snap.distanceM;
+          ride.movingTimeS = snap.movingTimeS;
+          ride.endedAt = source?.now() ?? Date.now();
+          await updateRide(ride);
+          navigate(`/sorties/${encodeURIComponent(ride.id)}`);
+          return;
         }
-        if (snap) toast(`Sortie terminée : ${km(snap.distanceM)} km, ${clock(snap.movingTimeS)} en mouvement`, 'success', 6000);
       } catch (err) {
         toast(errorMessage(err), 'error');
       }
@@ -475,6 +654,8 @@ export function createRideView(simulated: boolean): View {
       void flush();
       document.body.classList.remove('ride-mode');
       pager.destroy();
+      alertsUi.destroy();
+      sound.close();
       profileChart?.destroy();
       map?.destroy();
     };

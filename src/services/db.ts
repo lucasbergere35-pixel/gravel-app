@@ -17,6 +17,8 @@ import { computeRouteStats, STATS_VERSION, type RouteStats } from '../core/geo/s
 import type { Backup } from '../core/backup';
 import { DEFAULT_FOODS, sanitizeFoods, type Food } from '../core/nutrition/foods';
 import type { Level } from '../core/nutrition/recommendations';
+import { DEFAULT_DRINK_INTERVAL_S, type RideNutritionState } from '../core/ride/intakes';
+import type { RideFeeling, RideSummary } from '../core/ride/summary';
 
 const DB_NAME = 'gravel-compagnon';
 const DB_VERSION = 2;
@@ -75,6 +77,12 @@ export interface RideMeta {
   simulated: boolean;
   distanceM: number;
   movingTimeS: number;
+  /** Plan nutrition figé au démarrage + état des prises (absent si pas de plan). */
+  nutrition?: RideNutritionState;
+  /** Bilan calculé à la fin de la sortie. */
+  summary?: RideSummary;
+  /** Ressenti saisi après la sortie. */
+  feeling?: RideFeeling;
 }
 
 /** Position enregistrée (déjà filtrée) d'une sortie. */
@@ -210,7 +218,13 @@ export async function deleteRoute(id: string): Promise<void> {
 
 // ---------- Sorties ----------
 
-export async function createRide(input: { routeId: string; routeName: string; startedAt: number; simulated: boolean }): Promise<RideMeta> {
+export async function createRide(input: {
+  routeId: string;
+  routeName: string;
+  startedAt: number;
+  simulated: boolean;
+  nutrition?: RideNutritionState;
+}): Promise<RideMeta> {
   const ride: RideMeta = { id: newId(), endedAt: null, distanceM: 0, movingTimeS: 0, ...input };
   const d = await db();
   await d.put('rides', ride);
@@ -241,6 +255,18 @@ export async function getActiveRide(): Promise<RideMeta | null> {
   const all = await d.getAll('rides');
   const active = all.filter((r) => r.endedAt === null).sort((a, b) => b.startedAt - a.startedAt);
   return active[0] ?? null;
+}
+
+export async function getRide(rideId: string): Promise<RideMeta | null> {
+  const d = await db();
+  return (await d.get('rides', rideId)) ?? null;
+}
+
+/** Sorties terminées, la plus récente d'abord. */
+export async function listFinishedRides(): Promise<RideMeta[]> {
+  const d = await db();
+  const all = await d.getAll('rides');
+  return all.filter((r) => r.endedAt !== null).sort((a, b) => b.startedAt - a.startedAt);
 }
 
 export async function deleteRide(rideId: string): Promise<void> {
@@ -301,6 +327,32 @@ export async function getNutritionPrefs(): Promise<NutritionPrefs> {
 export async function saveNutritionPrefs(prefs: NutritionPrefs): Promise<void> {
   const d = await db();
   await d.put('settings', prefs, 'nutritionPrefs');
+}
+
+// ---------- Réglages du mode sortie ----------
+
+export interface RideSettings {
+  /** Son des alertes (prises, boisson). */
+  sound: boolean;
+  /** Intervalle du rappel boisson en minutes de temps en mouvement ; 0 = désactivé. */
+  drinkIntervalMin: number;
+}
+
+export const DEFAULT_RIDE_SETTINGS: RideSettings = { sound: true, drinkIntervalMin: DEFAULT_DRINK_INTERVAL_S / 60 };
+
+export async function getRideSettings(): Promise<RideSettings> {
+  const d = await db();
+  const raw = (await d.get('settings', 'rideSettings')) as Partial<RideSettings> | undefined;
+  const interval = Number(raw?.drinkIntervalMin);
+  return {
+    sound: raw?.sound !== false,
+    drinkIntervalMin: Number.isFinite(interval) && interval >= 0 && interval <= 120 ? interval : DEFAULT_RIDE_SETTINGS.drinkIntervalMin,
+  };
+}
+
+export async function saveRideSettings(settings: RideSettings): Promise<void> {
+  const d = await db();
+  await d.put('settings', settings, 'rideSettings');
 }
 
 // ---------- Sauvegarde complète (export / import JSON) ----------

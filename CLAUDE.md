@@ -52,18 +52,30 @@ src/
                        (−3…+4 %, hors montée, recherche ±1 km puis ±3 km) ; glucides ∝ énergie jusqu'à la prise suivante ;
                        portions arrondies VERS LE BAS (écart reporté) ; lents sur le roulant, rapides avant montée/vallonné ;
                        chaque prise a un « why » (raison affichée). Test clé : total ≤ objectif + 10 %.
+    nutrition/routePlan.ts  prepareRoute / computeEnergy / computePlan / computeRouteNutrition : calcul du plan PARTAGÉ
+                       par l'écran nutrition et le démarrage d'une sortie (même plan garanti)
+    ride/intakes.ts    prises en sortie : plan FIGÉ (freezePlan), états pending/due/done/skipped ; déclenchement sur la
+                       position LE LONG DU TRACÉ (recalage), ou au temps en mouvement estimé si hors tracé/sans position ;
+                       pré-alerte 500 m (90 s) ; « Plus tard » = +1 km (+4 min hors tracé) ; une prise due reste due ;
+                       rappel boisson toutes les N min de temps en mouvement, pas < 5 min après une prise ni pendant une
+                       prise affichée ; summarizeNutrition (g/h seulement si ≥ 15 min couvertes)
+    ride/summary.ts    bilan (D+ GPS lissé, vitesse moyenne), ressenti (bonne / coup de mou / fringale + km), GPX de la sortie
     backup.ts          format JSON de sauvegarde (app, version, stores), parseBackup (vérifie tout avant d'écrire), describeBackup
   services/    accès aux API du navigateur
-    db.ts              IndexedDB v2 : routes, routeTracks, settings (clés 'profile', 'foods', 'nutritionPrefs' = objectif g/h + bonus montée), rides (résumé), ridePoints (positions
+    db.ts              IndexedDB v2 : routes, routeTracks, settings (clés 'profile', 'foods', 'nutritionPrefs' = objectif g/h + bonus montée,
+                       'rideSettings' = son + intervalle boisson) ; RideMeta.nutrition (plan figé + états), .summary, .feeling, rides (résumé), ridePoints (positions
                        filtrées, ajout par lots) ; dumpAll / restoreAll (FUSION par identifiant, une transaction, positions
                        d'une sortie remplacées pour éviter les doublons)
     files.ts           lecture fichier, export via Web Share (iOS « Enregistrer dans Fichiers ») ou téléchargement
     geolocation.ts     PositionSource + DeviceGps (watchPosition haute précision, relancé au retour premier plan)
-    simulator.ts       SimulatedGps : rejoue un itinéraire (bruit, points imprécis, arrêt km 1, écart 80 m km 2, trou km 3)
+    simulator.ts       SimulatedGps : rejoue un itinéraire (bruit, points imprécis, arrêt km 1, écart 80 m km 2, trou km 3),
+                       altitude simulée depuis le profil
+    sound.ts           AlertSound (Web Audio, sons « prise » et « boisson » ; unlock() pendant l'appui sur Démarrer)
     wakeLock.ts        ScreenWakeLock (redemandé au retour au premier plan)
   map/mapView.ts       MapView (MapLibre) + createMapView (message si WebGL indisponible) ; mode sortie : flèche (Marker rotationAlignment map), boussole (tap = bascule), « sens de la marche » (bearing = cap, position au tiers bas via padding top = h/3) ou « nord en haut », trace bleue regroupée toutes les 2 s, suivi/recentrer ; en dev, `window.__gcMap`
   ui/
-    router.ts          routeur par hash (#/, #/itineraire/:id, #/nutrition/:id, #/profil, #/aliments, #/sortie/:id, #/simulation/:id)
+    router.ts          routeur par hash (#/, #/itineraire/:id, #/nutrition/:id, #/profil, #/aliments, #/sortie/:id, #/simulation/:id,
+                       #/sorties, #/sorties/:id)
     help.ts            textes réutilisés (avertissement médical, aide sauvegarde)
     pager.ts           logique pure de pagination (glissement, page mémorisée) — testée
     views/             écrans ; ride.ts = mode sortie (masque en-tête et onglets via body.ride-mode) en 3 pages :
@@ -73,7 +85,10 @@ src/
                        effort en montée, pendant, avant, dépense + détail du calcul)
     components/        elevationChart (fiche itinéraire), rideProfile (profil en sortie : parcouru bleu via clipPath, montée orange),
                        ridePager (pages 3/4 + bandeau 1/4 : vitesse, km, cadenas, points ; glissement UNIQUEMENT sur le bandeau ;
-                       cadenas = voile plein écran, appui long 1 s pour déverrouiller ; zone d’alertes commune), toasts
+                       cadenas = voile plein écran, appui long 1 s pour déverrouiller ; zone d’alertes commune ; zone « priority »
+                       AU-DESSUS du voile), rideAlerts (pré-alerte, bannière de prise Fait/Plus tard/Passer, bannière boisson ;
+                       écran verrouillé → boutons à MAINTENIR 0,6 s), toasts
+                       views/rides.ts : « Mes sorties » + bilan (stats, bilan nutrition, ressenti, export GPX, suppression)
   main.ts              coquille (en-tête, onglets), routeur, service worker
 scripts/make-icons.mjs génère les PNG d'icônes dans public/ (npm run icons)
 docs/GUIDE.md          guide pas à pas pour l'utilisateur (installation, test, mise en ligne, iPhone)
@@ -82,7 +97,8 @@ docs/GUIDE.md          guide pas à pas pour l'utilisateur (installation, test, 
 ## Règles
 - Toute la logique de calcul va dans `core/` avec des tests ; pas d'accès DOM/IndexedDB dans `core/` (sauf DOMParser pour le GPX).
 - Base de données : pour une évolution, incrémenter `DB_VERSION` et ajouter un bloc `if (oldVersion < N)` dans `upgrade()`, rendu idempotent (`objectStoreNames.contains`). Ne jamais modifier un bloc existant. Attention en dev : le rechargement à chaud peut appliquer un `DB_VERSION` modifié avant le bloc de migration → écrire le bloc AVANT d'incrémenter la version.
-- Mode sortie : les positions acceptées sont enregistrées toutes les 15 s / 30 points et au passage en arrière-plan ; une sortie avec `endedAt === null` est proposée à la reprise (bannière dans la liste) et rejouée dans RideTracker. Les simulations sont supprimées à la fin et ne sont jamais reprises.
+- Mode sortie : les positions acceptées sont enregistrées toutes les 15 s / 30 points et au passage en arrière-plan ; une sortie avec `endedAt === null` est proposée à la reprise (bannière dans la liste) et rejouée dans RideTracker. Les simulations terminées sont gardées (étiquette « Simulation », supprimables) ; une simulation non terminée est supprimée et jamais reprise.
+- Ravitaillement : le plan est figé au DÉMARRAGE (pas à la reprise) ; l'état des prises est sauvegardé via la même file d'écriture que les positions (`flushing`) pour éviter les conflits. Fin de sortie → `ride.summary` puis `#/sorties/:id`.
 - Mode sortie : UNE seule carte MapLibre, déplacée entre les emplacements des pages 0 et 1 (puis `relayout()`). La page affichée est mémorisée dans localStorage `gc.ride.page`. Les alertes (hors tracé, GPS) vont dans `pager.alerts`, jamais dans une page.
 - Dans le mode sortie, l'heure de référence vient de `PositionSource.now()` (accélérée en simulation), jamais directement de `Date.now()`.
 - Import de fichier : **ne pas mettre d'attribut `accept`** sur l'input (sinon les .gpx sont grisés dans Fichiers sur iOS).
@@ -105,5 +121,5 @@ Déploiement : `git push` sur `main` → GitHub Actions → https://lucasbergere
 - [x] Étape 2 (+ carte orientée dans le sens de la marche, MapLibre) : mode sortie GPS (filtre, recalage, alerte hors tracé > 50 m / levée < 40 m, distance/D+ restants, temps total + temps en mouvement avec pause auto, Wake Lock, reprise au premier plan, enregistrement incrémental + reprise après fermeture, simulation)
 - [x] Mode sortie en 3 pages (tableau de bord / carte / profil avec montées), bandeau fixe, cadenas
 - [x] Étape 3 : profil complet + modèle énergie + plan nutrition (sources : Thomas/Erdman/Burke 2016 ACSM ; Jeukendrup 2014 ; Sawka 2007 ACSM) + export/import de toutes les données en JSON. Toujours afficher l'avertissement « pas un avis médical » (`describeHelp.medical`).
-- [ ] Étape 4 : alertes nutrition en sortie (bannière, son, « Fait », rappel boisson ~20 min), export GPX de la sortie
+- [x] Étape 4 : alertes de prise en sortie (plan figé, position sur le tracé, pré-alerte, son, Fait/Plus tard/Passer, utilisables cadenas actif), rappel boisson, bilan de fin + ressenti, « Mes sorties », export GPX de la sortie
 - Plus tard : BRouter, points d'eau OSM (Overpass), météo Open-Meteo, cartes hors ligne (autre source de tuiles), type de surface, bilan après sortie

@@ -4,12 +4,10 @@
  * physique détaillé), glucides avant / pendant, hydratation, aliments emportés
  * et prises réparties par km avec leur raison.
  */
-import { detectClimbs } from '../../core/geo/climbs';
-import { cumulativeDistances } from '../../core/geo/distance';
-import { buildElevationProfile, PROFILE_STEP_M, type ElevationProfile } from '../../core/geo/elevation';
-import { CLIMB_BOOST_FULL_GRADE, DRIVETRAIN_EFFICIENCY, estimateEnergy, MUSCLE_EFFICIENCY, type EnergyResult } from '../../core/energy/model';
+import { CLIMB_BOOST_FULL_GRADE, DRIVETRAIN_EFFICIENCY, MUSCLE_EFFICIENCY, type EnergyResult } from '../../core/energy/model';
 import { FOOD_KIND_LABELS, type Food } from '../../core/nutrition/foods';
-import { FIRST_INTAKE_S, isBigClimb, planNutrition } from '../../core/nutrition/plan';
+import { FIRST_INTAKE_S, isBigClimb } from '../../core/nutrition/plan';
+import { computeEnergy, computePlan, prepareRoute } from '../../core/nutrition/routePlan';
 import {
   duringRideCarbs,
   LEVEL_LABELS,
@@ -29,14 +27,6 @@ const BOTTLE_ML = 750;
 const BOOST_CHOICES = [0, 10, 15, 20, 25, 30, 40];
 const fr = (n: number, digits = 1) => n.toLocaleString('fr-FR', { maximumFractionDigits: digits });
 
-/** Profil plat de secours quand le GPX n'a pas d'altitude. */
-function flatProfile(totalM: number): ElevationProfile {
-  const distances: number[] = [];
-  for (let d = 0; d < totalM; d += PROFILE_STEP_M) distances.push(d);
-  distances.push(totalM);
-  return { step: PROFILE_STEP_M, distances, elevations: distances.map(() => 0) };
-}
-
 /** Vide un élément puis le remplit (les null sont ignorés). */
 function fill(node: HTMLElement, ...children: Parameters<typeof append>[1][]): void {
   node.replaceChildren();
@@ -55,21 +45,10 @@ export const nutritionView: View = async (root, params) => {
     return;
   }
   const { meta: route, track } = data;
-  const cum = cumulativeDistances(track.points);
-  const realProfile = buildElevationProfile(track.points, cum);
-  const elevation = realProfile ?? flatProfile(cum[cum.length - 1] ?? 0);
-  const climbs = realProfile ? detectClimbs(realProfile) : [];
-  const bigClimbs = climbs.filter(isBigClimb).length;
-
-  const computeEnergy = (): EnergyResult =>
-    estimateEnergy(elevation, {
-      riderKg: profile.weightKg,
-      bikeKg: profile.bikeKg,
-      heightCm: profile.heightCm,
-      avgSpeedKmh: profile.avgSpeedKmh,
-      climbBoost: prefs.climbBoostPct / 100,
-    });
-  let energy = computeEnergy();
+  const prepared = prepareRoute(track.points);
+  const { cum, realProfile } = prepared;
+  const bigClimbs = prepared.climbs.filter(isBigClimb).length;
+  let energy: EnergyResult = computeEnergy(prepared, profile, prefs);
 
   const settingsCard = el('section', { class: 'card stack' });
   const energyCard = el('section', { class: 'card' });
@@ -123,7 +102,7 @@ export const nutritionView: View = async (root, params) => {
     boost.addEventListener('change', () => {
       prefs.climbBoostPct = Number(boost.value);
       void persistPrefs();
-      energy = computeEnergy();
+      energy = computeEnergy(prepared, profile, prefs);
       renderAll();
     });
 
@@ -222,16 +201,8 @@ export const nutritionView: View = async (root, params) => {
 
   // ---------- J'emporte + plan ----------
   function renderPlan(): void {
-    const during = duringRideCarbs(energy.durationS, profile.level, prefs.targetGPerH);
-    const plan = planNutrition({
-      profile: elevation,
-      timeAt: energy.timeAt,
-      energyAt: energy.energyAt,
-      durationS: energy.durationS,
-      targetGPerH: during.targetGPerH,
-      foods,
-      climbs,
-    });
+    // Même calcul que celui figé au démarrage d'une sortie.
+    const { during, plan } = computePlan(prepared, energy, profile, prefs, foods);
 
     fill(packCard,
       el('h2', {}, 'J’emporte'),

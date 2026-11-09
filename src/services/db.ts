@@ -14,6 +14,9 @@ import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
 import type { GpsFix } from '../core/gps/types';
 import type { TrackPoint, Waypoint } from '../core/types';
 import { computeRouteStats, STATS_VERSION, type RouteStats } from '../core/geo/stats';
+import type { Backup } from '../core/backup';
+import { DEFAULT_FOODS, sanitizeFoods, type Food } from '../core/nutrition/foods';
+import type { Level } from '../core/nutrition/recommendations';
 
 const DB_NAME = 'gravel-compagnon';
 const DB_VERSION = 2;
@@ -34,12 +37,32 @@ export interface RouteTrack {
   waypoints: Waypoint[];
 }
 
+export type Sex = 'homme' | 'femme';
+
 export interface Profile {
-  /** Vitesse moyenne habituelle en gravel (km/h). Les autres champs arrivent à l'étape 3. */
+  /** Vitesse moyenne habituelle en gravel, en roulant (km/h). */
   avgSpeedKmh: number;
+  weightKg: number;
+  heightCm: number;
+  age: number;
+  sex: Sex;
+  /** Poids du vélo équipé (sacoches, bidons pleins compris), kg. */
+  bikeKg: number;
+  level: Level;
+  /** Vrai une fois le formulaire complet enregistré (sinon : valeurs par défaut). */
+  complete: boolean;
 }
 
-export const DEFAULT_PROFILE: Profile = { avgSpeedKmh: 18 };
+export const DEFAULT_PROFILE: Profile = {
+  avgSpeedKmh: 18,
+  weightKg: 70,
+  heightCm: 175,
+  age: 35,
+  sex: 'homme',
+  bikeKg: 12,
+  level: 'intermediaire',
+  complete: false,
+};
 
 /** Une sortie réelle (ou simulée). Les positions sont dans le magasin ridePoints. */
 export interface RideMeta {
@@ -238,4 +261,66 @@ export async function getProfile(): Promise<Profile> {
 export async function saveProfile(profile: Profile): Promise<void> {
   const d = await db();
   await d.put('settings', profile, 'profile');
+}
+
+// ---------- Aliments ----------
+
+export async function getFoods(): Promise<Food[]> {
+  const d = await db();
+  const stored = sanitizeFoods(await d.get('settings', 'foods'));
+  return stored ?? DEFAULT_FOODS.map((f) => ({ ...f }));
+}
+
+export async function saveFoods(foods: Food[]): Promise<void> {
+  const d = await db();
+  await d.put('settings', foods, 'foods');
+}
+
+// ---------- Sauvegarde complète (export / import JSON) ----------
+
+/** Toutes les données, prêtes à être écrites dans un fichier JSON. */
+export async function dumpAll(): Promise<Backup['stores']> {
+  const d = await db();
+  const tx = d.transaction(['routes', 'routeTracks', 'settings', 'rides', 'ridePoints'], 'readonly');
+  const settingsStore = tx.objectStore('settings');
+  const [routes, routeTracks, settingKeys, settingValues, rides, ridePoints] = await Promise.all([
+    tx.objectStore('routes').getAll(),
+    tx.objectStore('routeTracks').getAll(),
+    settingsStore.getAllKeys(),
+    settingsStore.getAll(),
+    tx.objectStore('rides').getAll(),
+    tx.objectStore('ridePoints').getAll(),
+  ]);
+  await tx.done;
+  return {
+    routes,
+    routeTracks,
+    settings: settingKeys.map((key, i) => ({ key: String(key), value: settingValues[i] })),
+    rides,
+    ridePoints,
+  };
+}
+
+/**
+ * Restaure une sauvegarde EN FUSIONNANT : les éléments de la sauvegarde
+ * remplacent ceux qui ont le même identifiant ; les autres sont conservés.
+ * Tout se fait dans une seule transaction (tout ou rien).
+ */
+export async function restoreAll(stores: Backup['stores']): Promise<void> {
+  const d = await db();
+  const tx = d.transaction(['routes', 'routeTracks', 'settings', 'rides', 'ridePoints'], 'readwrite');
+  const ops: Promise<unknown>[] = [];
+  for (const r of stores.routes) ops.push(tx.objectStore('routes').put(r as RouteMeta));
+  for (const t of stores.routeTracks) ops.push(tx.objectStore('routeTracks').put(t as RouteTrack));
+  for (const s of stores.settings) ops.push(tx.objectStore('settings').put(s.value, s.key));
+  const pts = tx.objectStore('ridePoints');
+  for (const r of stores.rides) {
+    const ride = r as RideMeta;
+    ops.push(tx.objectStore('rides').put(ride));
+    // Remplace les positions de cette sortie (évite les doublons).
+    const keys = await pts.index('byRide').getAllKeys(ride.id);
+    for (const k of keys) ops.push(pts.delete(k));
+  }
+  for (const p of stores.ridePoints) ops.push(pts.add(p as RidePoint));
+  await Promise.all([...ops, tx.done]);
 }

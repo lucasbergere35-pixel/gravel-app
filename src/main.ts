@@ -8,6 +8,8 @@ import { requestPersistentStorage } from './services/db';
 import { toast } from './ui/components/toast';
 import { el, errorMessage } from './ui/dom';
 import { startRouter } from './ui/router';
+import { foodsView } from './ui/views/foods';
+import { nutritionView } from './ui/views/nutrition';
 import { profileView } from './ui/views/profile';
 import { createRideView } from './ui/views/ride';
 import { routeDetailView } from './ui/views/routeDetail';
@@ -15,6 +17,7 @@ import { routesListView } from './ui/views/routesList';
 
 const TABS = [
   { id: 'routes', href: '#/', label: 'Itinéraires', icon: '🗺️' },
+  { id: 'foods', href: '#/aliments', label: 'Aliments', icon: '🍌' },
   { id: 'profile', href: '#/profil', label: 'Profil', icon: '👤' },
 ] as const;
 
@@ -59,6 +62,8 @@ startRouter(
     { path: '/', view: routesListView, tab: 'routes' },
     { path: '/itineraire/:id', view: routeDetailView, tab: 'routes' },
     { path: '/profil', view: profileView, tab: 'profile' },
+    { path: '/aliments', view: foodsView, tab: 'foods' },
+    { path: '/nutrition/:id', view: nutritionView, tab: 'routes' },
     { path: '/sortie/:id', view: createRideView(false), tab: 'routes' },
     { path: '/simulation/:id', view: createRideView(true), tab: 'routes' },
   ],

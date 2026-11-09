@@ -34,18 +34,32 @@ src/
     ride/tracker.ts    RideTracker : distance, vitesse lissée, temps en mouvement (pause auto 3 / 1,5 km/h), trous > 15 s
     gpx/parse.ts       GPX 1.0/1.1, trk puis rte, ignore les namespaces (getElementsByTagNameNS('*'))
     gpx/write.ts       GPX 1.1
+    energy/model.ts    modèle physique : puissance CONSTANTE trouvée par dichotomie pour tenir la vitesse moyenne du profil ;
+                       Crr 0,010, CdA 0,40 × (surface corporelle Du Bois / 1,85), ρ selon altitude, transmission 97 %,
+                       vitesse plafonnée 40 km/h en descente, rendement musculaire brut 24 % ; timeAt[] = temps cumulé par échantillon
+    nutrition/recommendations.ts  avant (1–4 g/kg selon durée, 2–4 h avant), pendant (<1h30 facultatif ; ≤2h30 30–60 g/h ;
+                       >2h30 60–90 g/h ; objectif bas/milieu/haut selon niveau), eau 500–750 mL/h ; sources citées en tête
+    nutrition/foods.ts aliments par défaut (glucides/portion, max par prise), sanitizeFoods
+    nutrition/plan.ts  prises : 1re à 30 min, puis ≤ 25 min d'écart, dernière ≥ 15 min avant la fin ; décalées (±1 km) vers un
+                       point « calme » (pente −3…+4 %, hors montée) ; portions : aliments principaux en rotation + petits en complément
+    backup.ts          format JSON de sauvegarde (app, version, stores), parseBackup (vérifie tout avant d'écrire), describeBackup
   services/    accès aux API du navigateur
-    db.ts              IndexedDB v2 : routes, routeTracks, settings, rides (résumé), ridePoints (positions filtrées, ajout par lots)
+    db.ts              IndexedDB v2 : routes, routeTracks, settings (clés 'profile', 'foods'), rides (résumé), ridePoints (positions
+                       filtrées, ajout par lots) ; dumpAll / restoreAll (FUSION par identifiant, une transaction, positions
+                       d'une sortie remplacées pour éviter les doublons)
     files.ts           lecture fichier, export via Web Share (iOS « Enregistrer dans Fichiers ») ou téléchargement
     geolocation.ts     PositionSource + DeviceGps (watchPosition haute précision, relancé au retour premier plan)
     simulator.ts       SimulatedGps : rejoue un itinéraire (bruit, points imprécis, arrêt km 1, écart 80 m km 2, trou km 3)
     wakeLock.ts        ScreenWakeLock (redemandé au retour au premier plan)
   map/mapView.ts       MapView (MapLibre) + createMapView (message si WebGL indisponible) ; mode sortie : flèche (Marker rotationAlignment map), boussole (tap = bascule), « sens de la marche » (bearing = cap, position au tiers bas via padding top = h/3) ou « nord en haut », trace bleue regroupée toutes les 2 s, suivi/recentrer ; en dev, `window.__gcMap`
   ui/
-    router.ts          routeur par hash (#/, #/itineraire/:id, #/profil, #/sortie/:id, #/simulation/:id)
+    router.ts          routeur par hash (#/, #/itineraire/:id, #/nutrition/:id, #/profil, #/aliments, #/sortie/:id, #/simulation/:id)
+    help.ts            textes réutilisés (avertissement médical, aide sauvegarde)
     pager.ts           logique pure de pagination (glissement, page mémorisée) — testée
     views/             écrans ; ride.ts = mode sortie (masque en-tête et onglets via body.ride-mode) en 3 pages :
-                       0 Tableau de bord (carte + chiffres + commandes), 1 Carte plein écran, 2 Profil (montées)
+                       0 Tableau de bord (carte + chiffres + commandes), 1 Carte plein écran, 2 Profil (montées) ;
+                       profile.ts (formulaire complet + Mes données export/import), foods.ts (enregistrement auto),
+                       nutrition.ts (dépense + détail du calcul, avant/pendant, j'emporte, plan des prises, à emporter)
     components/        elevationChart (fiche itinéraire), rideProfile (profil en sortie : parcouru bleu via clipPath, montée orange),
                        ridePager (pages 3/4 + bandeau 1/4 : vitesse, km, cadenas, points ; glissement UNIQUEMENT sur le bandeau ;
                        cadenas = voile plein écran, appui long 1 s pour déverrouiller ; zone d’alertes commune), toasts
@@ -79,6 +93,6 @@ Déploiement : `git push` sur `main` → GitHub Actions → https://lucasbergere
 - [x] Étape 1 : projet, import GPX, carte, stats, profil altimétrique, liste (renommer/supprimer), export GPX, PWA, déploiement
 - [x] Étape 2 (+ carte orientée dans le sens de la marche, MapLibre) : mode sortie GPS (filtre, recalage, alerte hors tracé > 50 m / levée < 40 m, distance/D+ restants, temps total + temps en mouvement avec pause auto, Wake Lock, reprise au premier plan, enregistrement incrémental + reprise après fermeture, simulation)
 - [x] Mode sortie en 3 pages (tableau de bord / carte / profil avec montées), bandeau fixe, cadenas
-- [ ] Étape 3 : profil complet + modèle énergie (Crr 0,010, CdA ~0,40, rendement 24 %, puissance constante calée sur la vitesse moyenne) + plan nutrition (sources : Thomas/Erdman/Burke 2016 ACSM ; Jeukendrup 2014 ; Sawka 2007 ACSM) + **export/import de toutes les données en JSON**
+- [x] Étape 3 : profil complet + modèle énergie + plan nutrition (sources : Thomas/Erdman/Burke 2016 ACSM ; Jeukendrup 2014 ; Sawka 2007 ACSM) + export/import de toutes les données en JSON. Toujours afficher l'avertissement « pas un avis médical » (`describeHelp.medical`).
 - [ ] Étape 4 : alertes nutrition en sortie (bannière, son, « Fait », rappel boisson ~20 min), export GPX de la sortie
 - Plus tard : BRouter, points d'eau OSM (Overpass), météo Open-Meteo, cartes hors ligne (autre source de tuiles), type de surface, bilan après sortie

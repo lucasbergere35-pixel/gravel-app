@@ -381,6 +381,202 @@ input[type='number'] {
   font-weight: 700;
 }
 
+/* ---------- Profil, aliments, nutrition ---------- */
+h3 {
+  font-size: 18px;
+  margin: 16px 0 8px;
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.field .muted {
+  margin: 0;
+}
+.choices {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.choices legend {
+  margin-bottom: 6px;
+}
+.choice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 52px;
+  padding: 8px 14px;
+  border: 2px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  font-weight: 700;
+}
+.choice:has(input:checked) {
+  border-color: var(--brand);
+  background: #e8f5e9;
+}
+input[type='radio'],
+input[type='checkbox'] {
+  width: 26px;
+  height: 26px;
+  accent-color: var(--brand);
+  flex: none;
+}
+.notice {
+  background: #fff8e1;
+  border-color: #f9a825;
+  font-weight: 700;
+}
+.disclaimer {
+  background: #e3f2fd;
+  border-color: #64b5f6;
+  font-size: 16px;
+}
+.big-figure {
+  font-size: 40px;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+}
+.kv {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 16px;
+}
+.kv strong {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.formula {
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 14px;
+  background: var(--bg);
+  padding: 8px;
+  border-radius: 8px;
+  overflow-x: auto;
+}
+.calc-details summary {
+  font-weight: 800;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  color: var(--brand);
+}
+.plain-list {
+  margin: 4px 0;
+  padding-left: 22px;
+}
+.plain-list li {
+  margin: 4px 0;
+}
+.pack-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 12px;
+}
+.pack-item {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 52px;
+  border-bottom: 1px solid var(--border);
+  font-weight: 700;
+}
+.intake-list {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.intake {
+  display: grid;
+  grid-template-columns: 84px 1fr;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 10px;
+  background: var(--bg);
+  border: 2px solid var(--border);
+  border-radius: 12px;
+}
+.intake.on-slope {
+  border-color: #f9a825;
+}
+.intake-km {
+  font-size: 22px;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+}
+.intake-what {
+  font-size: 18px;
+  font-weight: 800;
+}
+.sources {
+  margin-top: 16px;
+  font-size: 14px;
+}
+.row {
+  display: flex;
+  gap: 8px;
+}
+.row .btn {
+  flex: 1;
+}
+.food-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  opacity: 0.75;
+}
+.food-card.selected {
+  opacity: 1;
+  border-color: var(--brand);
+}
+.food-check {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  font-weight: 800;
+}
+.food-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+  align-items: end; /* champs alignés même si un libellé passe sur 2 lignes */
+}
+.food-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--muted);
+  min-width: 0;
+}
+.food-field.wide {
+  grid-column: 1 / -1;
+}
+.food-field input {
+  min-height: 48px;
+  font-size: 18px;
+  padding: 6px 8px;
+}
+.food-card .btn-small {
+  align-self: flex-end;
+}
+
 /* ---------- Sélecteur ---------- */
 .select {
   width: 100%;

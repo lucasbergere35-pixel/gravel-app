@@ -124,6 +124,7 @@ export const routeDetailView: View = async (root, params) => {
       'div',
       { class: 'stack actions' },
       el('a', { href: `#/sortie/${encodeURIComponent(meta.id)}`, class: 'btn btn-primary btn-block btn-huge' }, '▶ Démarrer la sortie'),
+      el('a', { href: `#/nutrition/${encodeURIComponent(meta.id)}`, class: 'btn btn-block' }, '🍌 Plan nutrition'),
       el('a', { href: `#/simulation/${encodeURIComponent(meta.id)}`, class: 'btn btn-block' }, 'Simuler la sortie (test)'),
       exportBtn,
       deleteBtn,

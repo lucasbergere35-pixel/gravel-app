@@ -9,7 +9,9 @@
  *    of Canada. Med Sci Sports Exerc. 2016;48(3):543-568.
  *  - Pendant l'effort (selon la durée) : < 1 h 15–1 h 30 : facultatif ;
  *    1–2,5 h : 30–60 g/h ; > 2,5 h : jusqu'à 90 g/h (mélange glucose + fructose,
- *    nécessite un « entraînement de l'intestin »).
+ *    nécessite un « entraînement de l'intestin »). Ces chiffres visent la
+ *    performance ; pour une sortie loisir on retient des objectifs plus bas
+ *    (LEVEL_TARGET_RANGES), modifiables par l'utilisateur.
  *    Jeukendrup A. « A step towards personalized sports nutrition: carbohydrate
  *    intake during exercise ». Sports Med. 2014;44(Suppl 1):S25-S33.
  *  - Hydratation : environ 0,4 à 0,8 L/h selon la chaleur et la transpiration,
@@ -40,13 +42,32 @@ export function preRideCarbs(durationS: number, weightKg: number): PreRideAdvice
   return { gPerKg, totalG: Math.round(gPerKg * weightKg), hoursBefore: [2, 4] };
 }
 
+/**
+ * Objectifs « sortie loisir » par niveau (g/h). Volontairement dans le bas des
+ * fourchettes scientifiques (30–60 g/h jusqu'à 2 h 30, 60–90 g/h au-delà, qui
+ * visent la performance en compétition) : en balade sportive, l'intensité est
+ * plus faible et un intestin non entraîné tolère mal les grosses quantités.
+ */
+export const LEVEL_TARGET_RANGES: Record<Level, [number, number]> = {
+  debutant: [30, 45],
+  intermediaire: [40, 60],
+  confirme: [60, 80],
+};
+
+/** Limites acceptées pour un objectif saisi à la main (g/h). */
+export const TARGET_MIN_G_PER_H = 10;
+export const TARGET_MAX_G_PER_H = 120;
+
 export interface DuringRideAdvice {
-  /** Fourchette recommandée (g/h). */
+  /** Fourchette par défaut pour le niveau (g/h). */
   rangeGPerH: [number, number];
-  /** Objectif retenu selon le niveau (g/h) ; 0 = facultatif. */
+  /** Objectif retenu (g/h) ; 0 = facultatif (sortie courte). */
   targetGPerH: number;
+  /** Objectif calculé automatiquement (g/h), avant un éventuel réglage manuel. */
+  autoTargetGPerH: number;
+  /** Vrai si l'objectif vient du réglage manuel. */
+  manual: boolean;
   optional: boolean;
-  totalG: number;
   /** Hydratation (mL/h) : fourchette et objectif. */
   waterRangeMlPerH: [number, number];
   waterTargetMlPerH: number;
@@ -54,29 +75,24 @@ export interface DuringRideAdvice {
 }
 
 /**
- * Pendant la sortie. Dans la fourchette, on vise bas pour un débutant (intestin
- * non entraîné, risque de troubles digestifs au-delà de ~60 g/h), haut pour un confirmé.
+ * Pendant la sortie. Moins de 1 h 30 : facultatif. Jusqu'à 2 h 30 : bas de la
+ * fourchette du niveau ; au-delà : milieu de la fourchette. Un objectif saisi
+ * à la main (manualGPerH) remplace toujours le calcul automatique.
  */
-export function duringRideCarbs(durationS: number, level: Level): DuringRideAdvice {
+export function duringRideCarbs(durationS: number, level: Level, manualGPerH: number | null = null): DuringRideAdvice {
   const h = durationS / 3600;
-  const pick = (lo: number, hi: number) => (level === 'debutant' ? lo : level === 'intermediaire' ? (lo + hi) / 2 : hi);
-  let range: [number, number];
-  let optional = false;
-  if (h < 1.5) {
-    range = [0, 30];
-    optional = true;
-  } else if (h <= 2.5) {
-    range = [30, 60];
-  } else {
-    range = [60, 90];
-  }
-  const target = optional ? 0 : Math.round(pick(range[0], range[1]));
+  const range = LEVEL_TARGET_RANGES[level];
+  const optional = h < 1.5;
+  const auto = optional ? 0 : h <= 2.5 ? range[0] : Math.round((range[0] + range[1]) / 2 / 5) * 5;
+  const manual = manualGPerH !== null && Number.isFinite(manualGPerH);
+  const target = manual ? Math.min(TARGET_MAX_G_PER_H, Math.max(TARGET_MIN_G_PER_H, Math.round(manualGPerH!))) : auto;
   const waterTarget = 600;
   return {
     rangeGPerH: range,
     targetGPerH: target,
-    optional,
-    totalG: Math.round(target * h),
+    autoTargetGPerH: auto,
+    manual,
+    optional: optional && !manual,
     waterRangeMlPerH: [500, 750],
     waterTargetMlPerH: waterTarget,
     waterTotalMl: Math.round((waterTarget * h) / 50) * 50,

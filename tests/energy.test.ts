@@ -65,7 +65,27 @@ describe('estimateEnergy', () => {
     const flat = estimateEnergy(profileOf(40_000, () => 100), rider);
     const hilly = estimateEnergy(profileOf(40_000, (d) => 100 + 80 * Math.sin(d / 2000)), rider);
     expect(hilly.metabolicKcal).toBeGreaterThan(flat.metabolicKcal);
-    expect(hilly.powerW).toBeGreaterThan(flat.powerW);
+    expect(hilly.powerAvgW).toBeGreaterThan(flat.powerAvgW);
+  });
+
+  it('puissance variable : +25 % en montée > 4 %, même durée totale', () => {
+    // 10 km plat puis 5 km à 6 %
+    const p = profileOf(15_000, (d) => (d < 10_000 ? 100 : 100 + (d - 10_000) * 0.06));
+    const r = estimateEnergy(p, { ...rider, avgSpeedKmh: 16 });
+    expect(r.durationS).toBeCloseTo(15_000 / (16 / 3.6), -1);
+    expect(r.powerClimbW).toBeCloseTo(r.powerFlatW * 1.25, 5);
+    // Énergie dépensée par km plus forte dans la montée
+    const kcalPerKmFlat = r.energyAt[1000] / 10;
+    const kcalPerKmClimb = (r.energyAt[1500] - r.energyAt[1000]) / 5;
+    expect(kcalPerKmClimb).toBeGreaterThan(kcalPerKmFlat * 2);
+    // Énergie cumulée croissante et cohérente avec le total
+    expect(r.energyAt[r.energyAt.length - 1]).toBeCloseTo(r.metabolicKcal, 5);
+  });
+
+  it('sans bonus montée : puissance constante', () => {
+    const p = profileOf(15_000, (d) => (d < 10_000 ? 100 : 100 + (d - 10_000) * 0.06));
+    const r = estimateEnergy(p, { ...rider, avgSpeedKmh: 16, climbBoost: 0 });
+    expect(r.powerClimbW).toBeCloseTo(r.powerFlatW, 5);
   });
 
   it('plus lourd = plus d’énergie', () => {

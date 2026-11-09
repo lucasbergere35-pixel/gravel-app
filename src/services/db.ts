@@ -276,6 +276,33 @@ export async function saveFoods(foods: Food[]): Promise<void> {
   await d.put('settings', foods, 'foods');
 }
 
+// ---------- Réglages du plan nutrition ----------
+
+export interface NutritionPrefs {
+  /** Objectif de glucides saisi à la main (g/h) ; null = automatique selon le niveau. */
+  targetGPerH: number | null;
+  /** Effort supplémentaire en montée > 4 % (%), utilisé par le modèle d'énergie. */
+  climbBoostPct: number;
+}
+
+export const DEFAULT_NUTRITION_PREFS: NutritionPrefs = { targetGPerH: null, climbBoostPct: 25 };
+
+export async function getNutritionPrefs(): Promise<NutritionPrefs> {
+  const d = await db();
+  const raw = (await d.get('settings', 'nutritionPrefs')) as Partial<NutritionPrefs> | undefined;
+  const target = Number(raw?.targetGPerH);
+  const boost = Number(raw?.climbBoostPct);
+  return {
+    targetGPerH: raw?.targetGPerH !== null && raw?.targetGPerH !== undefined && Number.isFinite(target) ? target : null,
+    climbBoostPct: Number.isFinite(boost) && boost >= 0 && boost <= 60 ? boost : DEFAULT_NUTRITION_PREFS.climbBoostPct,
+  };
+}
+
+export async function saveNutritionPrefs(prefs: NutritionPrefs): Promise<void> {
+  const d = await db();
+  await d.put('settings', prefs, 'nutritionPrefs');
+}
+
 // ---------- Sauvegarde complète (export / import JSON) ----------
 
 /** Toutes les données, prêtes à être écrites dans un fichier JSON. */

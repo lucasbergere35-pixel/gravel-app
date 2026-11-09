@@ -6,18 +6,23 @@
  *   P · η_transmission = ( m·g·Crr·cos θ  +  m·g·sin θ  +  ½·ρ·CdA·v² ) · v
  *                          roulement          pente          air
  *
- * Hypothèse de rythme : on pédale à puissance CONSTANTE P (sauf en descente,
- * où la vitesse est plafonnée et où l'on peut cesser de pédaler). On cherche
- * P (par dichotomie) pour que la durée totale corresponde à la vitesse
- * moyenne habituelle du profil. On obtient ainsi une vitesse réaliste par
- * tronçon : lente dans les montées, rapide dans les descentes.
+ * Hypothèse de rythme : PUISSANCE VARIABLE selon la pente, comme un cycliste
+ * réel qui « appuie » davantage en côte :
+ *   - jusqu'à 2 % : puissance de base P ;
+ *   - à partir de 4 % : P × (1 + bonus montée), par défaut +25 % (réglable) ;
+ *   - entre 2 et 4 % : transition progressive ;
+ *   - en descente : vitesse plafonnée (40 km/h), on cesse alors de pédaler.
+ * On cherche P (par dichotomie) pour que la durée totale corresponde à la
+ * vitesse moyenne habituelle du profil.
  *
  * Énergie dépensée = travail mécanique / rendement musculaire brut (~24 %).
  * Le rendement « brut » inclut déjà le métabolisme de repos pendant l'effort.
+ * On calcule l'énergie cumulée le long du parcours (energyAt) : elle sert à
+ * espacer les prises selon l'effort réel, pas selon le temps.
  *
  * Références des paramètres :
  *  - Crr gravel ≈ 0,008–0,012 (pneus 38–45 mm sur chemin roulant) → 0,010
- *  - CdA ≈ 0,40 m² (cintre gravel, position mains sur cocottes, vêtements amples),
+ *  - CdA ≈ 0,40 m² (cintre gravel, mains sur cocottes, vêtements amples),
  *    ajusté à la surface corporelle (formule de Du Bois)
  *  - ρ air = 1,225 kg/m³ au niveau de la mer, décroît avec l'altitude
  *  - rendement de transmission ≈ 97 % ; rendement musculaire brut ≈ 24 %
@@ -36,12 +41,19 @@ export const MUSCLE_EFFICIENCY = 0.24;
 /** Vitesse max en descente sur gravel (m/s) : prudence sur chemin. */
 export const MAX_DESCENT_SPEED_MS = 40 / 3.6;
 export const J_PER_KCAL = 4184;
+/** Bonus de puissance en montée par défaut (+25 %). */
+export const CLIMB_BOOST_DEFAULT = 0.25;
+/** Pente à partir de laquelle le bonus s'applique entièrement / commence. */
+export const CLIMB_BOOST_FULL_GRADE = 0.04;
+export const CLIMB_BOOST_START_GRADE = 0.02;
 
 export interface EnergyInput {
   riderKg: number;
   bikeKg: number;
   heightCm: number;
   avgSpeedKmh: number;
+  /** Bonus de puissance en montée (0,25 = +25 %). */
+  climbBoost?: number;
 }
 
 export interface EnergyResult {
@@ -49,13 +61,20 @@ export interface EnergyResult {
   cdaM2: number;
   crr: number;
   rhoKgM3: number;
-  /** Puissance de pédalage constante trouvée (W). */
-  powerW: number;
+  climbBoost: number;
+  /** Puissance de base, sur le plat (W). */
+  powerFlatW: number;
+  /** Puissance en montée > 4 % (W). */
+  powerClimbW: number;
+  /** Puissance moyenne réellement fournie (W), descentes en roue libre comprises. */
+  powerAvgW: number;
   durationS: number;
   mechanicalKJ: number;
   metabolicKcal: number;
-  /** Temps cumulé (s) à chaque échantillon du profil : sert à passer du km à l'heure. */
+  /** Temps cumulé (s) à chaque échantillon du profil. */
   timeAt: number[];
+  /** Énergie métabolique cumulée (kcal) à chaque échantillon du profil. */
+  energyAt: number[];
 }
 
 /** Surface corporelle (Du Bois & Du Bois, 1916), m². */
@@ -68,7 +87,14 @@ export function airDensity(altitudeM: number): number {
   return RHO_SEA_LEVEL * Math.exp(-Math.max(0, altitudeM) / 8500);
 }
 
-/** Force résistante hors air (N) pour une pente donnée (tan θ = grade). */
+/** Multiplicateur de puissance selon la pente (tan θ = grade). */
+export function powerFactor(grade: number, boost: number): number {
+  if (grade <= CLIMB_BOOST_START_GRADE) return 1;
+  if (grade >= CLIMB_BOOST_FULL_GRADE) return 1 + boost;
+  return 1 + (boost * (grade - CLIMB_BOOST_START_GRADE)) / (CLIMB_BOOST_FULL_GRADE - CLIMB_BOOST_START_GRADE);
+}
+
+/** Force résistante hors air (N) pour une pente donnée. */
 function gravityRolling(massKg: number, grade: number, crr: number): number {
   const theta = Math.atan(grade);
   return massKg * G * (crr * Math.cos(theta) + Math.sin(theta));
@@ -87,7 +113,7 @@ export function speedForPower(powerW: number, grade: number, massKg: number, cda
   let hi = 30;
   if (f(hi) < target) return hi;
   if (f(lo) >= target) return Math.min(lo, MAX_DESCENT_SPEED_MS);
-  for (let i = 0; i < 60; i++) {
+  for (let i = 0; i < 40; i++) {
     const mid = (lo + hi) / 2;
     if (f(mid) < target) lo = mid;
     else hi = mid;
@@ -101,88 +127,113 @@ export function powerForSpeed(v: number, grade: number, massKg: number, cdaM2: n
   return Math.max(0, p / DRIVETRAIN_EFFICIENCY);
 }
 
-/** Simule le parcours à puissance constante : durée et travail mécanique. */
-function ride(profile: ElevationProfile, powerW: number, massKg: number, cdaM2: number, rhos: number[], crr: number) {
+interface RideSim {
+  time: number;
+  work: number;
+  timeAt: number[];
+  workAt: number[];
+}
+
+/** Simule le parcours avec une puissance de base donnée (variable selon la pente). */
+function ride(profile: ElevationProfile, baseW: number, boost: number, massKg: number, cdaM2: number, rhos: number[], crr: number): RideSim {
   const { distances: d, elevations: e } = profile;
   let time = 0;
   let work = 0;
   const timeAt = new Array<number>(d.length);
+  const workAt = new Array<number>(d.length);
   timeAt[0] = 0;
+  workAt[0] = 0;
   for (let i = 1; i < d.length; i++) {
     const len = d[i] - d[i - 1];
-    if (len <= 0) {
-      timeAt[i] = time;
-      continue;
+    if (len > 0) {
+      const grade = (e[i] - e[i - 1]) / len;
+      const target = baseW * powerFactor(grade, boost);
+      const v = speedForPower(target, grade, massKg, cdaM2, rhos[i], crr);
+      const dt = len / v;
+      // Puissance réellement fournie : la cible, sauf si la vitesse est plafonnée (descente).
+      const p = Math.min(target, powerForSpeed(v, grade, massKg, cdaM2, rhos[i], crr));
+      time += dt;
+      work += p * dt;
     }
-    const grade = (e[i] - e[i - 1]) / len;
-    const v = speedForPower(powerW, grade, massKg, cdaM2, rhos[i], crr);
-    const dt = len / v;
-    // Puissance réellement fournie : P, sauf si la vitesse est plafonnée (descente).
-    const p = Math.min(powerW, powerForSpeed(v, grade, massKg, cdaM2, rhos[i], crr));
-    time += dt;
-    work += p * dt;
     timeAt[i] = time;
+    workAt[i] = work;
   }
-  return { time, work, timeAt };
+  return { time, work, timeAt, workAt };
 }
 
 export function estimateEnergy(profile: ElevationProfile, input: EnergyInput, crr = CRR_GRAVEL): EnergyResult {
+  const boost = Math.max(0, input.climbBoost ?? CLIMB_BOOST_DEFAULT);
   const massKg = input.riderKg + input.bikeKg;
   const cdaM2 = CDA_REF_M2 * (bodySurfaceArea(input.riderKg, input.heightCm) / BSA_REF_M2);
   const rhos = profile.elevations.map(airDensity);
   const total = profile.distances[profile.distances.length - 1] ?? 0;
   const targetTime = total / (input.avgSpeedKmh / 3.6);
 
-  // Dichotomie sur la puissance : plus de puissance → durée plus courte.
+  // Dichotomie sur la puissance de base : plus de puissance → durée plus courte.
   let lo = 5;
   let hi = 1500;
-  for (let i = 0; i < 50; i++) {
+  for (let i = 0; i < 40; i++) {
     const mid = (lo + hi) / 2;
-    if (ride(profile, mid, massKg, cdaM2, rhos, crr).time > targetTime) lo = mid;
+    if (ride(profile, mid, boost, massKg, cdaM2, rhos, crr).time > targetTime) lo = mid;
     else hi = mid;
   }
-  const powerW = (lo + hi) / 2;
-  const r = ride(profile, powerW, massKg, cdaM2, rhos, crr);
+  const baseW = (lo + hi) / 2;
+  const r = ride(profile, baseW, boost, massKg, cdaM2, rhos, crr);
   const rhoMean = rhos.reduce((a, b) => a + b, 0) / Math.max(1, rhos.length);
+  const toKcal = (joules: number) => joules / MUSCLE_EFFICIENCY / J_PER_KCAL;
   return {
     massKg,
     cdaM2,
     crr,
     rhoKgM3: rhoMean,
-    powerW,
+    climbBoost: boost,
+    powerFlatW: baseW,
+    powerClimbW: baseW * (1 + boost),
+    powerAvgW: r.time > 0 ? r.work / r.time : 0,
     durationS: r.time,
     mechanicalKJ: r.work / 1000,
-    metabolicKcal: r.work / MUSCLE_EFFICIENCY / J_PER_KCAL,
+    metabolicKcal: toKcal(r.work),
     timeAt: r.timeAt,
+    energyAt: r.workAt.map(toKcal),
   };
 }
 
-/** Temps (s) au passage d'une distance donnée, d'après le résultat du modèle. */
-export function timeAtDistance(profile: ElevationProfile, timeAt: readonly number[], alongM: number): number {
-  const n = timeAt.length;
+/** Valeur d'une série cumulée (temps, énergie…) à une distance donnée, par interpolation. */
+export function seriesAtDistance(profile: ElevationProfile, series: readonly number[], alongM: number): number {
+  const n = series.length;
   if (n === 0) return 0;
+  if (n === 1) return series[0];
   const i = Math.min(n - 2, Math.max(0, Math.floor(alongM / profile.step)));
-  if (n === 1) return timeAt[0];
   const d0 = profile.distances[i];
   const d1 = profile.distances[i + 1];
   const t = d1 > d0 ? Math.min(1, Math.max(0, (alongM - d0) / (d1 - d0))) : 0;
-  return timeAt[i] + (timeAt[i + 1] - timeAt[i]) * t;
+  return series[i] + (series[i + 1] - series[i]) * t;
 }
 
-/** Distance (m) atteinte à un temps donné (inverse de timeAtDistance). */
-export function distanceAtTime(profile: ElevationProfile, timeAt: readonly number[], timeS: number): number {
-  const n = timeAt.length;
+/** Distance (m) où une série cumulée croissante atteint une valeur (inverse de seriesAtDistance). */
+export function distanceAtSeries(profile: ElevationProfile, series: readonly number[], value: number): number {
+  const n = series.length;
   if (n === 0) return 0;
-  if (timeS <= 0) return 0;
-  if (timeS >= timeAt[n - 1]) return profile.distances[n - 1];
+  if (value <= series[0]) return 0;
+  if (value >= series[n - 1]) return profile.distances[n - 1];
   let lo = 0;
   let hi = n - 1;
   while (hi - lo > 1) {
     const mid = (lo + hi) >> 1;
-    if (timeAt[mid] <= timeS) lo = mid;
+    if (series[mid] <= value) lo = mid;
     else hi = mid;
   }
-  const span = timeAt[hi] - timeAt[lo];
-  const t = span > 0 ? (timeS - timeAt[lo]) / span : 0;
+  const span = series[hi] - series[lo];
+  const t = span > 0 ? (value - series[lo]) / span : 0;
   return profile.distances[lo] + (profile.distances[hi] - profile.distances[lo]) * t;
+}
+
+/** Temps (s) au passage d'une distance donnée. */
+export function timeAtDistance(profile: ElevationProfile, timeAt: readonly number[], alongM: number): number {
+  return seriesAtDistance(profile, timeAt, alongM);
+}
+
+/** Distance (m) atteinte à un temps donné. */
+export function distanceAtTime(profile: ElevationProfile, timeAt: readonly number[], timeS: number): number {
+  return distanceAtSeries(profile, timeAt, timeS);
 }

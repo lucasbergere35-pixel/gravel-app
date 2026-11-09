@@ -3,7 +3,7 @@
  * et case « J'emporte » utilisée par le plan nutrition.
  * Chaque modification est enregistrée automatiquement.
  */
-import { DEFAULT_FOODS, sanitizeFoods, type Food } from '../../core/nutrition/foods';
+import { DEFAULT_FOODS, FOOD_KIND_LABELS, sanitizeFoods, type Food, type FoodKind } from '../../core/nutrition/foods';
 import { getFoods, newId, saveFoods } from '../../services/db';
 import { toast } from '../components/toast';
 import { el, errorMessage } from '../dom';
@@ -33,6 +33,11 @@ export const foodsView: View = async (root) => {
     const carbs = el('input', { type: 'number', inputmode: 'decimal', min: 0.5, max: 200, step: 0.5, value: food.carbsG, 'aria-label': 'Glucides par portion (g)' });
     const unit = el('input', { type: 'text', value: food.unit, maxlength: 30, 'aria-label': 'Nom d’une portion' });
     const max = el('input', { type: 'number', inputmode: 'numeric', min: 1, max: 20, step: 1, value: food.maxPerIntake, 'aria-label': 'Maximum par prise' });
+    const kind = el(
+      'select',
+      { class: 'select', 'aria-label': 'Type d’aliment' },
+      ...(Object.keys(FOOD_KIND_LABELS) as FoodKind[]).map((k) => el('option', { value: k, selected: k === food.kind }, FOOD_KIND_LABELS[k])),
+    );
     const del = el('button', { type: 'button', class: 'btn btn-small btn-danger' }, 'Supprimer');
 
     const card = el(
@@ -44,6 +49,7 @@ export const foodsView: View = async (root) => {
         el('label', { class: 'food-field' }, el('span', {}, 'Glucides / portion (g)'), carbs),
         el('label', { class: 'food-field' }, el('span', {}, 'Portion'), unit),
         el('label', { class: 'food-field' }, el('span', {}, 'Max par prise'), max),
+        el('label', { class: 'food-field wide' }, el('span', {}, 'Type : rapide (avant/pendant un effort) ou lent (sur le roulant)'), kind),
       ),
       del,
     );
@@ -60,10 +66,11 @@ export const foodsView: View = async (root) => {
       }
       const m = Number.parseInt(max.value, 10);
       if (Number.isFinite(m) && m >= 1) food.maxPerIntake = Math.min(20, m);
+      food.kind = kind.value === 'rapide' ? 'rapide' : 'lent';
       card.classList.toggle('selected', food.selected);
       scheduleSave();
     };
-    for (const input of [check, name, carbs, unit, max]) input.addEventListener('change', update);
+    for (const input of [check, name, carbs, unit, max, kind]) input.addEventListener('change', update);
     del.addEventListener('click', () => {
       foods = foods.filter((f) => f !== food);
       card.remove();
@@ -78,7 +85,7 @@ export const foodsView: View = async (root) => {
 
   const addBtn = el('button', { type: 'button', class: 'btn btn-block' }, '＋ Ajouter un aliment');
   addBtn.addEventListener('click', () => {
-    const f: Food = { id: newId(), name: 'Nouvel aliment', carbsG: 20, unit: 'portion', unitPlural: 'portions', selected: true, maxPerIntake: 1 };
+    const f: Food = { id: newId(), name: 'Nouvel aliment', carbsG: 20, unit: 'portion', unitPlural: 'portions', kind: 'lent', selected: true, maxPerIntake: 1 };
     foods.push(f);
     const card = row(f);
     list.append(card);

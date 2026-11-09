@@ -513,6 +513,54 @@ input[type='checkbox'] {
 .intake.on-slope {
   border-color: #f9a825;
 }
+.intake.pre-climb {
+  border-color: #ef6c00;
+  background: #fff3e0;
+}
+.intake-why {
+  font-size: 16px;
+  font-weight: 700;
+  color: #5d4037;
+}
+.plan-summary {
+  border: 3px solid var(--brand);
+  border-radius: var(--radius);
+  background: #e8f5e9;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  font-size: 16px;
+}
+.plan-summary.warn {
+  border-color: var(--danger);
+  background: #ffebee;
+}
+.plan-total {
+  font-size: 24px;
+  font-weight: 900;
+}
+.kind-tag {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+  vertical-align: middle;
+}
+.kind-rapide {
+  background: #fff3e0;
+  color: #bf360c;
+  border: 1px solid #ef6c00;
+}
+.kind-lent {
+  background: #e3f2fd;
+  color: #0d47a1;
+  border: 1px solid #64b5f6;
+}
+.notice-inline {
+  font-weight: 700;
+  color: #6d4c00;
+}
 .intake-km {
   font-size: 22px;
   font-weight: 900;

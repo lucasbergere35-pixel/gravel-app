@@ -34,17 +34,27 @@ src/
     ride/tracker.ts    RideTracker : distance, vitesse lissée, temps en mouvement (pause auto 3 / 1,5 km/h), trous > 15 s
     gpx/parse.ts       GPX 1.0/1.1, trk puis rte, ignore les namespaces (getElementsByTagNameNS('*'))
     gpx/write.ts       GPX 1.1
-    energy/model.ts    modèle physique : puissance CONSTANTE trouvée par dichotomie pour tenir la vitesse moyenne du profil ;
-                       Crr 0,010, CdA 0,40 × (surface corporelle Du Bois / 1,85), ρ selon altitude, transmission 97 %,
-                       vitesse plafonnée 40 km/h en descente, rendement musculaire brut 24 % ; timeAt[] = temps cumulé par échantillon
-    nutrition/recommendations.ts  avant (1–4 g/kg selon durée, 2–4 h avant), pendant (<1h30 facultatif ; ≤2h30 30–60 g/h ;
-                       >2h30 60–90 g/h ; objectif bas/milieu/haut selon niveau), eau 500–750 mL/h ; sources citées en tête
-    nutrition/foods.ts aliments par défaut (glucides/portion, max par prise), sanitizeFoods
-    nutrition/plan.ts  prises : 1re à 30 min, puis ≤ 25 min d'écart, dernière ≥ 15 min avant la fin ; décalées (±1 km) vers un
-                       point « calme » (pente −3…+4 %, hors montée) ; portions : aliments principaux en rotation + petits en complément
+    energy/model.ts    modèle physique : puissance VARIABLE (base P jusqu'à 2 %, P × (1 + bonus) dès 4 %, bonus réglable,
+                       défaut +25 %) ; P trouvée par dichotomie pour tenir la vitesse moyenne ; Crr 0,010, CdA 0,40 × (surface
+                       corporelle Du Bois / 1,85), ρ selon altitude, transmission 97 %, 40 km/h max en descente, rendement 24 % ;
+                       timeAt[] (s) et energyAt[] (kcal) cumulés par échantillon ; seriesAtDistance / distanceAtSeries.
+                       NB : à vitesse moyenne égale, le bonus montée réduit un peu la dépense totale (moins d'air sur le plat).
+    nutrition/recommendations.ts  avant (1–4 g/kg selon durée, 2–4 h avant) ; pendant : objectifs LOISIR par niveau
+                       (débutant 30–45, intermédiaire 40–60, confirmé 60–80 g/h ; < 1h30 facultatif ; ≤ 2h30 bas de
+                       fourchette, au-delà milieu) ; objectif manuel prioritaire (10–120 g/h) ; eau 500–750 mL/h ; sources en tête
+    nutrition/foods.ts aliments par défaut (glucides/portion, max par prise, type « rapide »/« lent »), sanitizeFoods
+                       (déduit le type des anciennes données)
+    nutrition/plan.ts  total = objectif g/h × (durée − 45 min : le repas d'avant couvre le début) ; prises régulières à
+                       intervalles d'ÉNERGIE égaux, nombre = ⌊durée couverte / (portion type ÷ objectif)⌋ (≥ 1 portion
+                       principale par prise, intervalle 20–45 min, écart mini ½ intervalle) ; prise RAPIDE 10–20 min (sinon
+                       5–25) avant chaque montée importante (> 50 m D+ ou > 1 km à > 4 %), qui remplace la prise régulière la
+                       plus proche ; pas de prise régulière dans les 10 min avant le pied (préférence) ; points « calmes »
+                       (−3…+4 %, hors montée, recherche ±1 km puis ±3 km) ; glucides ∝ énergie jusqu'à la prise suivante ;
+                       portions arrondies VERS LE BAS (écart reporté) ; lents sur le roulant, rapides avant montée/vallonné ;
+                       chaque prise a un « why » (raison affichée). Test clé : total ≤ objectif + 10 %.
     backup.ts          format JSON de sauvegarde (app, version, stores), parseBackup (vérifie tout avant d'écrire), describeBackup
   services/    accès aux API du navigateur
-    db.ts              IndexedDB v2 : routes, routeTracks, settings (clés 'profile', 'foods'), rides (résumé), ridePoints (positions
+    db.ts              IndexedDB v2 : routes, routeTracks, settings (clés 'profile', 'foods', 'nutritionPrefs' = objectif g/h + bonus montée), rides (résumé), ridePoints (positions
                        filtrées, ajout par lots) ; dumpAll / restoreAll (FUSION par identifiant, une transaction, positions
                        d'une sortie remplacées pour éviter les doublons)
     files.ts           lecture fichier, export via Web Share (iOS « Enregistrer dans Fichiers ») ou téléchargement
@@ -59,7 +69,8 @@ src/
     views/             écrans ; ride.ts = mode sortie (masque en-tête et onglets via body.ride-mode) en 3 pages :
                        0 Tableau de bord (carte + chiffres + commandes), 1 Carte plein écran, 2 Profil (montées) ;
                        profile.ts (formulaire complet + Mes données export/import), foods.ts (enregistrement auto),
-                       nutrition.ts (dépense + détail du calcul, avant/pendant, j'emporte, plan des prises, à emporter)
+                       nutrition.ts (plan des prises en tête avec total prévu et g/h réels, j'emporte, réglages objectif g/h +
+                       effort en montée, pendant, avant, dépense + détail du calcul)
     components/        elevationChart (fiche itinéraire), rideProfile (profil en sortie : parcouru bleu via clipPath, montée orange),
                        ridePager (pages 3/4 + bandeau 1/4 : vitesse, km, cadenas, points ; glissement UNIQUEMENT sur le bandeau ;
                        cadenas = voile plein écran, appui long 1 s pour déverrouiller ; zone d’alertes commune), toasts

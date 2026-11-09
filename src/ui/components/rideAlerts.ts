@@ -16,6 +16,7 @@ import { describeIntakes, type FrozenIntake } from '../../core/ride/intakes';
 import type { SoundKind } from '../../services/sound';
 import { el } from '../dom';
 import { int } from '../format';
+import { icon } from '../icons';
 
 export const BANNER_MS = 40_000;
 
@@ -82,8 +83,9 @@ export function createRideAlerts(priority: HTMLElement, alerts: HTMLElement, pla
   function renderIntake(): void {
     const t = describeIntakes(intakeGroup);
     intake.box.replaceChildren(
-      el('div', { class: 'ib-title' }, `🍌 ${t.title}`),
-      ...t.lines.map((l) => el('div', { class: 'ib-why' }, l)),
+      el('div', { class: 'banner-ic' }, icon('utensils')),
+      el('div', { class: 'ib-title' }, t.title),
+      ...t.lines.map((l) => el('div', { class: 'ib-why' }, t.preClimb ? icon('mountain') : null, l)),
       el('div', { class: 'banner-hint' }, 'Touche pour fermer'),
       el('div', { class: 'banner-timer' }),
     );
@@ -101,7 +103,8 @@ export function createRideAlerts(priority: HTMLElement, alerts: HTMLElement, pla
     },
     showDrink() {
       drink.box.replaceChildren(
-        el('div', { class: 'db-text' }, '💧 Pense à boire quelques gorgées'),
+        el('div', { class: 'banner-ic' }, icon('droplet')),
+        el('div', { class: 'db-text' }, 'Pense à boire quelques gorgées'),
         el('div', { class: 'banner-hint' }, 'Touche pour fermer'),
         el('div', { class: 'banner-timer' }),
       );
@@ -111,7 +114,7 @@ export function createRideAlerts(priority: HTMLElement, alerts: HTMLElement, pla
       if (next && intake.box.hidden) {
         const left = alongM !== null ? Math.max(0, next.distanceM - alongM) : null;
         const when = left !== null ? `dans ${int(Math.round(left / 50) * 50)} m` : 'dans ~2 min';
-        preBar.textContent = `🍌 Prise ${when} : ${next.label}`;
+        preBar.replaceChildren(icon('utensils'), `Prise ${when} : ${next.label}`);
         preBar.hidden = false;
       } else {
         preBar.hidden = true;

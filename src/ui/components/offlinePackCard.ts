@@ -19,6 +19,7 @@ import {
 import { toast } from './toast';
 import { append, el, errorMessage } from '../dom';
 import { int } from '../format';
+import { icon } from '../icons';
 
 export const mb = (bytes: number): string => `${(bytes / 1_048_576).toLocaleString('fr-FR', { maximumFractionDigits: 1, minimumFractionDigits: 1 })} Mo`;
 
@@ -46,7 +47,7 @@ export function createOfflinePackCard(
     return el(
       'div',
       { class: 'stack-tight' },
-      el('div', { class: 'offline-title' }, `⬇ Téléchargement de la carte… ${pct} %`),
+      el('div', { class: 'offline-title' }, icon('download'), `Téléchargement… ${pct} %`),
       el('div', { class: 'progress' }, el('div', { class: 'progress-bar', style: `width:${pct}%` })),
       el('div', { class: 'muted' }, `${int(p.done)} / ${int(p.total)} tuiles · ${mb(p.bytes)}. Tu peux changer d’écran, ça continue.`),
       stop,
@@ -61,7 +62,7 @@ export function createOfflinePackCard(
 
     const children: (HTMLElement | null)[] = [];
     if (pack?.status === 'complete') {
-      children.push(el('div', { class: 'offline-title ok' }, `✓ Disponible hors ligne · ${mb(packBytes(pack))}`));
+      children.push(el('div', { class: 'offline-title ok' }, icon('cloud-check'), `Disponible hors ligne · ${mb(packBytes(pack))}`));
       if (pack.narrow) children.push(el('p', { class: 'muted' }, 'Couloir réduit (±1 km) car l’itinéraire est long.'));
       if (!options.compact) {
         const del = el('button', { type: 'button', class: 'btn btn-small btn-danger' }, 'Supprimer la carte');
@@ -95,22 +96,22 @@ export function createOfflinePackCard(
       });
       if (pack?.status === 'limit') {
         children.push(
-          el('div', { class: 'offline-title warn' }, `⚠ Carte partielle · ${mb(packBytes(pack))}`),
+          el('div', { class: 'offline-title warn' }, icon('warning'), `Carte partielle · ${mb(packBytes(pack))}`),
           el('p', { class: 'muted' }, 'La limite de 50 Mo par téléchargement (OpenFreeMap) a été atteinte : le début du parcours est couvert, pas la fin.'),
         );
       } else if (pack && pack.status === 'partial') {
-        start.textContent = '⬇ Reprendre le téléchargement';
+        start.append(icon('download'), 'Reprendre le téléchargement');
         children.push(
           el('div', { class: 'offline-title warn' }, `Carte incomplète : ${int(pack.done)} / ${int(pack.keys.length)} tuiles (${mb(packBytes(pack))})`),
           start,
         );
       } else if (!plan.withinLimits) {
         children.push(
-          el('div', { class: 'offline-title warn' }, 'Carte hors ligne indisponible'),
+          el('div', { class: 'offline-title warn' }, icon('warning'), 'Carte hors ligne indisponible'),
           el('p', { class: 'muted' }, `Itinéraire trop long pour un seul téléchargement (≈ ${mb(plan.estimatedBytes)}, ${int(plan.keys.length)} tuiles ; limite OpenFreeMap : 50 Mo ou 3 000 tuiles).`),
         );
       } else {
-        start.textContent = `⬇ Carte hors ligne (≈ ${mb(plan.estimatedBytes)})`;
+        start.append(icon('download'), `Télécharger (≈ ${mb(plan.estimatedBytes)})`);
         children.push(
           start,
           el(
@@ -133,7 +134,7 @@ export function createOfflinePackCard(
         element.replaceChildren(progressView(p));
         return;
       }
-      if (p.status === 'complete') toast('Carte hors ligne prête ✓', 'success');
+      if (p.status === 'complete') toast('Carte hors ligne prête', 'success');
       else if (p.message) toast(p.message, p.status === 'cancelled' ? 'info' : 'error', 6000);
       unsubscribe();
       void render();

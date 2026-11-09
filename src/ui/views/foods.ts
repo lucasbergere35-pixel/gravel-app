@@ -7,6 +7,7 @@ import { DEFAULT_FOODS, FOOD_KIND_LABELS, sanitizeFoods, type Food, type FoodKin
 import { getFoods, newId, saveFoods } from '../../services/db';
 import { toast } from '../components/toast';
 import { el, errorMessage } from '../dom';
+import { icon } from '../icons';
 import type { View } from '../router';
 
 export const foodsView: View = async (root) => {
@@ -28,30 +29,26 @@ export const foodsView: View = async (root) => {
   }
 
   function row(food: Food): HTMLElement {
-    const check = el('input', { type: 'checkbox', checked: food.selected, 'aria-label': `J’emporte : ${food.name}` });
+    const check = el('input', { type: 'checkbox', class: 'switch', checked: food.selected, 'aria-label': `J’emporte : ${food.name}` });
     const name = el('input', { type: 'text', value: food.name, maxlength: 60, 'aria-label': 'Nom' });
     const carbs = el('input', { type: 'number', inputmode: 'decimal', min: 0.5, max: 200, step: 0.5, value: food.carbsG, 'aria-label': 'Glucides par portion (g)' });
     const unit = el('input', { type: 'text', value: food.unit, maxlength: 30, 'aria-label': 'Nom d’une portion' });
     const max = el('input', { type: 'number', inputmode: 'numeric', min: 1, max: 20, step: 1, value: food.maxPerIntake, 'aria-label': 'Maximum par prise' });
     const kind = el(
       'select',
-      { class: 'select', 'aria-label': 'Type d’aliment' },
+      { 'aria-label': 'Type d’aliment' },
       ...(Object.keys(FOOD_KIND_LABELS) as FoodKind[]).map((k) => el('option', { value: k, selected: k === food.kind }, FOOD_KIND_LABELS[k])),
     );
-    const del = el('button', { type: 'button', class: 'btn btn-small btn-danger' }, 'Supprimer');
+    const del = el('button', { type: 'button', class: 'icon-btn danger', 'aria-label': `Supprimer ${food.name}` }, icon('trash'));
 
     const card = el(
       'div',
-      { class: `card food-card${food.selected ? ' selected' : ''}` },
-      el('label', { class: 'food-check' }, check, el('span', {}, 'J’emporte')),
-      el('div', { class: 'food-grid' },
-        el('label', { class: 'food-field wide' }, el('span', {}, 'Aliment'), name),
-        el('label', { class: 'food-field' }, el('span', {}, 'Glucides / portion (g)'), carbs),
-        el('label', { class: 'food-field' }, el('span', {}, 'Portion'), unit),
-        el('label', { class: 'food-field' }, el('span', {}, 'Max par prise'), max),
-        el('label', { class: 'food-field wide' }, el('span', {}, 'Type : rapide (avant/pendant un effort) ou lent (sur le roulant)'), kind),
-      ),
-      del,
+      { class: `group food-card${food.selected ? ' selected' : ''}` },
+      el('div', { class: 'form-row food-head' }, check, name, del),
+      el('label', { class: 'form-row' }, el('span', { class: 'row-label' }, 'Glucides / portion'), carbs, el('span', { class: 'unit' }, 'g')),
+      el('label', { class: 'form-row' }, el('span', { class: 'row-label' }, 'Portion'), unit),
+      el('label', { class: 'form-row' }, el('span', { class: 'row-label' }, 'Max par prise'), max),
+      el('label', { class: 'form-row' }, el('span', { class: 'row-label' }, 'Type'), kind),
     );
 
     const update = () => {
@@ -83,7 +80,7 @@ export const foodsView: View = async (root) => {
     list.replaceChildren(...foods.map(row));
   }
 
-  const addBtn = el('button', { type: 'button', class: 'btn btn-block' }, '＋ Ajouter un aliment');
+  const addBtn = el('button', { type: 'button', class: 'btn btn-block' }, icon('plus'), 'Ajouter un aliment');
   addBtn.addEventListener('click', () => {
     const f: Food = { id: newId(), name: 'Nouvel aliment', carbsG: 20, unit: 'portion', unitPlural: 'portions', kind: 'lent', selected: true, maxPerIntake: 1 };
     foods.push(f);
@@ -113,9 +110,12 @@ export const foodsView: View = async (root) => {
 
   render();
   root.append(
-    el('a', { href: '#/profil', class: 'back-link' }, '‹ Profil'),
     el('h1', {}, 'Mes aliments'),
-    el('p', { class: 'muted' }, 'Coche ce que tu emportes. Les glucides par portion sont indicatifs : vérifie l’étiquette de tes produits. Les modifications sont enregistrées automatiquement.'),
+    el(
+      'p',
+      { class: 'muted' },
+      'Active ce que tu emportes. Type « rapide » : avant ou pendant un effort ; « lent » : sur le roulant. Les glucides par portion sont indicatifs : vérifie l’étiquette. Enregistrement automatique.',
+    ),
     list,
     el('div', { class: 'stack actions' }, addBtn, resetBtn),
   );

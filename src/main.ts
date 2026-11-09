@@ -7,6 +7,7 @@ import './styles.css';
 import { requestPersistentStorage } from './services/db';
 import { toast } from './ui/components/toast';
 import { el, errorMessage } from './ui/dom';
+import { icon, type IconName } from './ui/icons';
 import { startRouter } from './ui/router';
 import { foodsView } from './ui/views/foods';
 import { nutritionView } from './ui/views/nutrition';
@@ -17,21 +18,18 @@ import { createRideView } from './ui/views/ride';
 import { routeDetailView } from './ui/views/routeDetail';
 import { routesListView } from './ui/views/routesList';
 
-const TABS = [
-  { id: 'routes', href: '#/', label: 'Itinéraires', icon: '🗺️' },
-  { id: 'rides', href: '#/sorties', label: 'Sorties', icon: '🚴' },
-  { id: 'foods', href: '#/aliments', label: 'Aliments', icon: '🍌' },
-  { id: 'profile', href: '#/profil', label: 'Profil', icon: '👤' },
-] as const;
+const TABS: { id: string; href: string; label: string; icon: IconName }[] = [
+  { id: 'routes', href: '#/', label: 'Itinéraires', icon: 'route' },
+  { id: 'rides', href: '#/sorties', label: 'Sorties', icon: 'bike' },
+  { id: 'foods', href: '#/aliments', label: 'Aliments', icon: 'apple' },
+  { id: 'profile', href: '#/profil', label: 'Profil', icon: 'user' },
+];
 
 function buildShell(): { main: HTMLElement; setTab: (id: string) => void } {
   const app = document.getElementById('app')!;
   const main = el('main', { id: 'view' });
-  const tabLinks = TABS.map((t) =>
-    el('a', { href: t.href, class: 'tab', 'data-tab': t.id }, el('span', { class: 'tab-icon', 'aria-hidden': 'true' }, t.icon), el('span', {}, t.label)),
-  );
+  const tabLinks = TABS.map((t) => el('a', { href: t.href, class: 'tab', 'data-tab': t.id }, icon(t.icon), el('span', {}, t.label)));
   app.append(
-    el('header', { class: 'app-header' }, el('span', { class: 'app-title' }, 'Gravel Compagnon')),
     main,
     el('nav', { class: 'tabbar', 'aria-label': 'Navigation' }, ...tabLinks),
   );

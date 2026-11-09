@@ -1,10 +1,13 @@
 /** Écran « Itinéraires » : import GPX et liste des itinéraires enregistrés. */
 import { parseGpx } from '../../core/gpx/parse';
-import { addRoute, getActiveRide, listRoutes, type RouteMeta } from '../../services/db';
+import { estimateDurationS } from '../../core/geo/stats';
+import { addRoute, getActiveRide, getProfile, listRoutes, type RouteMeta } from '../../services/db';
+import { listPacks } from '../../services/offlineMaps';
 import { readTextFile } from '../../services/files';
 import { toast } from '../components/toast';
 import { el, errorMessage } from '../dom';
-import { date, int, km } from '../format';
+import { duration, int, km } from '../format';
+import { icon } from '../icons';
 import { navigate, type View } from '../router';
 
 async function importFiles(files: File[]): Promise<RouteMeta[]> {
@@ -28,18 +31,55 @@ async function importFiles(files: File[]): Promise<RouteMeta[]> {
   return imported;
 }
 
-function routeCard(r: RouteMeta): HTMLElement {
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+/** Mini-carte du tracé (SVG, sans fond de carte). */
+function previewSvg(points: readonly [number, number][]): SVGSVGElement {
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('viewBox', '-0.1 -0.06 1.2 1.12');
+  svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+  svg.setAttribute('aria-hidden', 'true');
+  if (points.length >= 2) {
+    const d = points.map(([x, y], i) => `${i ? 'L' : 'M'}${x} ${y}`).join('');
+    const halo = document.createElementNS(SVG_NS, 'path');
+    halo.setAttribute('d', d);
+    halo.setAttribute('class', 'pv-halo');
+    const line = document.createElementNS(SVG_NS, 'path');
+    line.setAttribute('d', d);
+    line.setAttribute('class', 'pv-line');
+    const [sx, sy] = points[0];
+    const start = document.createElementNS(SVG_NS, 'circle');
+    start.setAttribute('cx', String(sx));
+    start.setAttribute('cy', String(sy));
+    start.setAttribute('r', '0.035');
+    start.setAttribute('class', 'pv-start');
+    svg.append(halo, line, start);
+  }
+  return svg;
+}
+
+function routeCard(r: RouteMeta, avgSpeedKmh: number, offline: boolean): HTMLElement {
   const s = r.stats;
   return el(
     'a',
     { class: 'card route-card', href: `#/itineraire/${encodeURIComponent(r.id)}` },
-    el('div', { class: 'route-card-name' }, r.name),
+    el('div', { class: 'route-preview' }, previewSvg(r.preview ?? [])),
     el(
       'div',
-      { class: 'route-card-stats' },
-      el('span', {}, el('strong', {}, km(s.distanceM)), ' km'),
-      s.hasElevation ? el('span', {}, el('strong', {}, int(s.gainM)), ' m D+') : null,
-      el('span', { class: 'muted' }, date(r.createdAt)),
+      { class: 'route-body' },
+      el(
+        'div',
+        { class: 'route-card-name' },
+        el('span', {}, r.name),
+        offline ? el('span', { class: 'badge' }, icon('cloud-check'), 'Hors ligne') : null,
+      ),
+      el(
+        'div',
+        { class: 'chips' },
+        el('span', { class: 'chip' }, icon('route'), `${km(s.distanceM)} km`),
+        s.hasElevation ? el('span', { class: 'chip' }, icon('trending-up'), `${int(s.gainM)} m`) : null,
+        el('span', { class: 'chip' }, icon('clock'), duration(estimateDurationS(s.distanceM, avgSpeedKmh))),
+      ),
     ),
   );
 }
@@ -48,24 +88,26 @@ export const routesListView: View = async (root) => {
   // Pas d'attribut « accept » : sur iPhone, les .gpx apparaissent sinon grisés
   // dans l'app Fichiers. Le contenu est vérifié après sélection.
   const input = el('input', { type: 'file', id: 'gpx-input', class: 'visually-hidden', multiple: true });
-  const importLabel = el('label', { for: 'gpx-input', class: 'btn btn-primary btn-block' }, '＋ Importer un GPX');
+  const importLabel = el('label', { for: 'gpx-input', class: 'btn btn-primary btn-block' }, icon('plus'), 'Importer un GPX');
   const list = el('div', { class: 'stack' });
 
   async function refresh(): Promise<void> {
-    const routes = await listRoutes();
+    const [routes, profile, packs] = await Promise.all([listRoutes(), getProfile(), listPacks()]);
+    const offline = new Set(packs.filter((p) => p.status === 'complete').map((p) => p.routeId));
     list.replaceChildren();
     if (routes.length === 0) {
       list.append(
         el(
           'div',
           { class: 'empty' },
+          icon('route'),
           el('p', {}, 'Aucun itinéraire pour l’instant.'),
           el('p', { class: 'muted' }, 'Exporte un GPX depuis Komoot (ou autre), enregistre-le dans Fichiers, puis importe-le ici.'),
         ),
       );
       return;
     }
-    list.append(...routes.map(routeCard));
+    list.append(...routes.map((r) => routeCard(r, profile.avgSpeedKmh, offline.has(r.id))));
   }
 
   input.addEventListener('change', async () => {
@@ -96,9 +138,9 @@ export const routesListView: View = async (root) => {
       el(
         'a',
         { class: 'card active-ride', href: `#/sortie/${encodeURIComponent(active.routeId)}` },
-        el('strong', {}, '● Sortie en cours'),
+        el('strong', { class: 'offline-title ok' }, icon('activity'), 'Sortie en cours'),
         el('div', {}, `${active.routeName} · ${km(active.distanceM)} km`),
-        el('div', { class: 'btn btn-primary btn-block' }, 'Reprendre'),
+        el('div', { class: 'btn btn-primary btn-block' }, icon('play'), 'Reprendre'),
       ),
     );
   }

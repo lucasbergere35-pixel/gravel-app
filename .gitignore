@@ -6,3 +6,6 @@ dev-dist/
 Thumbs.db
 .vscode/*
 !.vscode/extensions.json
+
+# Maquettes de design (captures locales)
+design/

@@ -78,7 +78,8 @@ describe('texte des bannières', () => {
   it('une prise : contenu + raison + grammes', () => {
     const t = describeIntakes([plan().intakes[1]]);
     expect(t.title).toBe('Km 20 : prise 1');
-    expect(t.lines).toEqual(['⛰ avant la montée de 2,1 km à 8 % (+159 m) · 25 g']);
+    expect(t.lines).toEqual(['avant la montée de 2,1 km à 8 % (+159 m) · 25 g']);
+    expect(t.preClimb).toBe(true);
   });
 
   it('plusieurs prises manquées : regroupées dans une seule bannière', () => {

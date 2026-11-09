@@ -155,6 +155,8 @@ export function updateIntakes(state: RideNutritionState, pos: RidePosition): Int
 export interface IntakeBannerText {
   title: string;
   lines: string[];
+  /** Prise unique placée avant une montée (l'interface affiche une icône de montagne). */
+  preClimb: boolean;
 }
 
 /**
@@ -166,12 +168,13 @@ export function describeIntakes(intakes: readonly FrozenIntake[]): IntakeBannerT
   const g = (n: number) => `${Math.round(n)} g`;
   if (intakes.length === 1) {
     const i = intakes[0];
-    return { title: `Km ${km(i.distanceM)} : ${i.label}`, lines: [`${i.reason === 'preClimb' ? '⛰ ' : ''}${i.why} · ${g(i.carbsG)}`] };
+    return { title: `Km ${km(i.distanceM)} : ${i.label}`, lines: [`${i.why} · ${g(i.carbsG)}`], preClimb: i.reason === 'preClimb' };
   }
   const total = intakes.reduce((s, i) => s + i.carbsG, 0);
   return {
     title: `${intakes.length} prises à rattraper`,
     lines: [...intakes.map((i) => `Km ${km(i.distanceM)} : ${i.label} (${g(i.carbsG)})`), `Total ${g(total)}, en une ou deux fois`],
+    preClimb: false,
   };
 }
 

@@ -8,7 +8,10 @@ import { safeFileName, shareOrDownload } from '../../services/files';
 import { toast } from '../components/toast';
 import { append, el, errorMessage } from '../dom';
 import { clock, date, int, km } from '../format';
+import { icon, type IconName } from '../icons';
 import { navigate, type View } from '../router';
+
+const FEELING_ICONS: Record<FeelingKind, IconName> = { bonne: 'face-smile', 'coup-de-mou': 'face-neutral', fringale: 'battery-low' };
 
 const fr1 = (n: number) => n.toLocaleString('fr-FR', { maximumFractionDigits: 1 });
 
@@ -28,7 +31,7 @@ export const ridesListView: View = async (root) => {
     root,
     el('h1', {}, 'Mes sorties'),
     rides.length === 0
-      ? el('div', { class: 'empty' }, el('p', {}, 'Aucune sortie terminée pour l’instant.'), el('p', { class: 'muted' }, 'Lance une sortie (ou une simulation) depuis un itinéraire.'))
+      ? el('div', { class: 'empty' }, icon('bike'), el('p', {}, 'Aucune sortie terminée pour l’instant.'), el('p', { class: 'muted' }, 'Lance une sortie (ou une simulation) depuis un itinéraire.'))
       : el(
           'div',
           { class: 'stack' },
@@ -37,16 +40,21 @@ export const ridesListView: View = async (root) => {
             const n: NutritionSummary | null = r.nutrition ? summarizeNutrition(r.nutrition, s?.movingTimeS ?? r.movingTimeS) : null;
             return el(
               'a',
-              { class: 'card route-card', href: `#/sorties/${encodeURIComponent(r.id)}` },
-              el('div', { class: 'route-card-name' }, r.routeName, r.simulated ? el('span', { class: 'kind-tag kind-rapide' }, 'Simulation') : null),
+              { class: 'card ride-card', href: `#/sorties/${encodeURIComponent(r.id)}` },
               el(
                 'div',
-                { class: 'route-card-stats' },
-                el('span', {}, el('strong', {}, km(s?.distanceM ?? r.distanceM)), ' km'),
-                el('span', {}, el('strong', {}, clock(s?.movingTimeS ?? r.movingTimeS)), ' en mvt'),
-                n && n.taken + n.notTaken > 0 ? el('span', {}, `🍌 ${n.taken}/${n.taken + n.notTaken}`) : null,
-                r.feeling ? el('span', {}, FEELING_LABELS[r.feeling.kind].split(' ')[0]) : null,
-                el('span', { class: 'muted' }, date(r.startedAt)),
+                { class: 'route-card-name' },
+                el('span', {}, r.routeName),
+                r.simulated ? el('span', { class: 'badge warn' }, icon('flask'), 'Simulation') : null,
+              ),
+              el('div', { class: 'muted', style: 'margin:-4px 0 8px' }, date(r.startedAt)),
+              el(
+                'div',
+                { class: 'chips' },
+                el('span', { class: 'chip' }, icon('route'), `${km(s?.distanceM ?? r.distanceM)} km`),
+                el('span', { class: 'chip' }, icon('timer'), clock(s?.movingTimeS ?? r.movingTimeS)),
+                n && n.taken + n.notTaken > 0 ? el('span', { class: 'chip' }, icon('utensils'), `${n.taken}/${n.taken + n.notTaken}`) : null,
+                r.feeling ? el('span', { class: 'chip', title: FEELING_LABELS[r.feeling.kind] }, icon(FEELING_ICONS[r.feeling.kind]), FEELING_LABELS[r.feeling.kind]) : null,
               ),
             );
           }),
@@ -72,10 +80,10 @@ export const rideSummaryView: View = async (root, params) => {
     'div',
     { class: 'stats-grid' },
     stat('Distance', km(s?.distanceM ?? ride.distanceM), ' km'),
-    stat('Vitesse moyenne', s ? fr1(s.avgSpeedKmh) : '—', ' km/h'),
+    stat('Moyenne', s ? fr1(s.avgSpeedKmh) : '—', ' km/h'),
     stat('En mouvement', clock(s?.movingTimeS ?? ride.movingTimeS), ''),
     stat('Temps total', s ? clock(s.totalTimeS) : '—', ''),
-    stat('Dénivelé + (GPS)', s?.gainM !== null && s?.gainM !== undefined ? int(s.gainM) : 'n/d', s?.gainM !== null && s?.gainM !== undefined ? ' m' : ''),
+    stat('D+ (GPS)', s?.gainM !== null && s?.gainM !== undefined ? int(s.gainM) : 'n/d', s?.gainM !== null && s?.gainM !== undefined ? ' m' : ''),
     nut ? stat('Rappels boisson', int(nut.drinkCount), '') : null,
   );
 
@@ -114,7 +122,7 @@ export const rideSummaryView: View = async (root, params) => {
   }
 
   if (!nut || nut.plan.intakes.length === 0) {
-    nutritionCard.append(el('h2', {}, '🍌 Bilan nutrition'), el('p', { class: 'muted' }, 'Pas de plan de ravitaillement pour cette sortie.'));
+    nutritionCard.append(el('h2', {}, icon('utensils'), 'Bilan nutrition'), el('p', { class: 'muted' }, 'Pas de plan de ravitaillement pour cette sortie.'));
   } else {
     let saving: Promise<void> = Promise.resolve();
     const rows = nut.plan.intakes.map((i, k) => {
@@ -144,7 +152,7 @@ export const rideSummaryView: View = async (root, params) => {
     });
     append(
       nutritionCard,
-      el('h2', {}, '🍌 Bilan nutrition'),
+      el('h2', {}, icon('utensils'), 'Bilan nutrition'),
       summaryBox,
       el('p', { class: 'muted' }, 'Chaque prise est comptée comme faite. Décoche celles que tu n’as pas prises : le bilan se met à jour.'),
       el('ol', { class: 'intake-list' }, ...rows),
@@ -169,8 +177,8 @@ export const rideSummaryView: View = async (root, params) => {
   const feelingForm = el(
     'form',
     { class: 'card stack' },
-    el('h2', {}, 'Ressenti'),
-    el('fieldset', { class: 'choices' }, ...kinds.map((k, i) => el('label', { for: `feel-${k}`, class: 'choice' }, radios[i], el('span', {}, FEELING_LABELS[k])))),
+    el('h2', {}, icon('activity'), 'Ressenti'),
+    el('fieldset', { class: 'choices' }, ...kinds.map((k, i) => el('label', { for: `feel-${k}`, class: 'choice' }, radios[i], icon(FEELING_ICONS[k]), el('span', {}, FEELING_LABELS[k])))),
     kmField,
     el('div', { class: 'field' }, el('label', { for: 'feel-note', class: 'field-label' }, 'Remarque (facultatif)'), noteInput),
     el('p', { class: 'muted' }, 'Ces notes serviront plus tard à ajuster tes besoins (objectif g/h, placement des prises).'),
@@ -194,7 +202,7 @@ export const rideSummaryView: View = async (root, params) => {
   });
 
   // ---------- Actions ----------
-  const exportBtn = el('button', { type: 'button', class: 'btn btn-block' }, '⬇ Exporter la sortie en GPX');
+  const exportBtn = el('button', { type: 'button', class: 'btn btn-block' }, icon('share'), 'Exporter la sortie en GPX');
   exportBtn.addEventListener('click', async () => {
     try {
       const fixes = await getRidePoints(ride.id);
@@ -232,9 +240,9 @@ export const rideSummaryView: View = async (root, params) => {
 
   append(
     root,
-    el('a', { href: '#/sorties', class: 'back-link' }, '‹ Mes sorties'),
+    el('a', { href: '#/sorties', class: 'back-link' }, icon('chevron-left'), 'Mes sorties'),
     el('h1', {}, 'Bilan de sortie'),
-    el('p', {}, rideTitle(ride), ride.simulated ? el('span', { class: 'kind-tag kind-rapide' }, 'Simulation') : null),
+    el('p', { class: 'muted' }, rideTitle(ride), ride.simulated ? el('span', { class: 'badge warn', style: 'margin-left:8px' }, icon('flask'), 'Simulation') : null),
     stats,
     nutritionCard,
     feelingForm,
@@ -242,7 +250,7 @@ export const rideSummaryView: View = async (root, params) => {
       'div',
       { class: 'stack actions' },
       exportBtn,
-      el('a', { href: `#/itineraire/${encodeURIComponent(ride.routeId)}`, class: 'btn btn-block' }, 'Voir l’itinéraire'),
+      el('a', { href: `#/itineraire/${encodeURIComponent(ride.routeId)}`, class: 'btn btn-block' }, icon('map'), 'Voir l’itinéraire'),
       deleteBtn,
     ),
   );

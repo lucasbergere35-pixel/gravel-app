@@ -66,6 +66,7 @@ import { createRideProfile } from '../components/rideProfile';
 import { toast } from '../components/toast';
 import { el, errorMessage } from '../dom';
 import { clock, int, km } from '../format';
+import { icon, type IconName } from '../icons';
 import { navigate, type View } from '../router';
 
 /** Alerte hors tracé au-delà de OFF_TRACK_ON_M, levée sous OFF_TRACK_OFF_M (hystérésis). */
@@ -77,16 +78,21 @@ const PAGE_DASHBOARD = 0;
 const PAGE_MAP = 1;
 
 /** Une tuile de chiffre : retourne l'élément et une fonction pour changer la valeur. */
-function tile(label: string, unit: string): { node: HTMLElement; set: (v: string) => void; note: HTMLElement } {
+function tile(label: string, unit: string, ic: IconName): { node: HTMLElement; set: (v: string) => void; note: HTMLElement } {
   const value = el('span', {}, '—');
   const note = el('span', { class: 'ride-note' });
   const node = el(
     'div',
     { class: 'ride-tile' },
     el('div', { class: 'ride-value' }, value, unit ? el('span', { class: 'ride-unit' }, unit) : null),
-    el('div', { class: 'ride-label' }, label, note),
+    el('div', { class: 'ride-label' }, icon(ic), label, note),
   );
   return { node, set: (v) => (value.textContent = v), note };
+}
+
+/** Bouton de commande : icône + libellé court. */
+function setCtrl(btn: HTMLElement, ic: IconName, label: string): void {
+  btn.replaceChildren(icon(ic), el('span', {}, label));
 }
 
 const fmt1 = (n: number) => n.toLocaleString('fr-FR', { maximumFractionDigits: 1, minimumFractionDigits: 1 });
@@ -131,23 +137,26 @@ export function createRideView(simulated: boolean): View {
     const offTrackBanner = el('div', { class: 'offtrack-banner', hidden: true, role: 'alert' });
     const gpsAlert = el('div', { class: 'gps-alert', hidden: true, role: 'alert' });
     const mapEl = el('div', { class: 'map map-ride' });
-    const recenterBtn = el('button', { type: 'button', class: 'btn btn-small recenter', hidden: true }, '◎ Recentrer');
+    const recenterBtn = el('button', { type: 'button', class: 'btn btn-small recenter', hidden: true }, icon('locate'), 'Recentrer');
     const mapWrap = el('div', { class: 'map-wrap' }, mapEl, recenterBtn);
 
     // ---------- Page 1 : tableau de bord ----------
-    const tLeft = tile('Restant', ' km');
-    const tClimbLeft = tile('D+ restant', ' m');
-    const tAvg = tile('Moyenne', ' km/h');
-    const tMoving = tile('En mouvement', '');
-    const tTotal = tile('Temps total', '');
-    const tGps = tile('GPS', '');
+    const tLeft = tile('Restant', ' km', 'flag');
+    const tClimbLeft = tile('D+ restant', ' m', 'trending-up');
+    const tAvg = tile('Moyenne', ' km/h', 'gauge');
+    const tMoving = tile('En mouvement', '', 'timer');
+    const tTotal = tile('Temps total', '', 'clock');
+    const tGps = tile('GPS', '', 'satellite');
     if (!cumClimb) tClimbLeft.set('n/d');
 
     const orientBtn = el('button', { type: 'button', class: 'btn ctrl-btn' });
-    const wakeBtn = el('button', { type: 'button', class: 'btn ctrl-btn' }, 'Écran : NON');
+    const wakeBtn = el('button', { type: 'button', class: 'btn ctrl-btn' });
+    setCtrl(wakeBtn, 'sun', 'Écran : non');
     const soundBtn = el('button', { type: 'button', class: 'btn ctrl-btn' });
-    const finishBtn = el('button', { type: 'button', class: 'btn btn-danger ctrl-btn' }, 'Terminer');
-    const quitLink = el('a', { href: `#/itineraire/${encodeURIComponent(route.id)}`, class: 'btn ctrl-btn' }, 'Quitter');
+    const finishBtn = el('button', { type: 'button', class: 'btn btn-danger ctrl-btn' });
+    setCtrl(finishBtn, 'square', 'Terminer');
+    const quitLink = el('a', { href: `#/itineraire/${encodeURIComponent(route.id)}`, class: 'btn ctrl-btn' });
+    setCtrl(quitLink, 'log-out', 'Quitter');
     const mapSlotDashboard = el('div', { class: 'map-slot map-slot-dashboard' });
     const mapSlotFull = el('div', { class: 'map-slot map-slot-full' });
 
@@ -180,12 +189,12 @@ export function createRideView(simulated: boolean): View {
     // ---------- Écran de départ ----------
     const factorSelect = el(
       'select',
-      { id: 'sim-factor', class: 'select' },
+      { id: 'sim-factor' },
       el('option', { value: '1' }, 'Temps réel (×1)'),
       el('option', { value: '10', selected: true }, 'Accéléré ×10'),
       el('option', { value: '30' }, 'Accéléré ×30'),
     );
-    const startBtn = el('button', { type: 'button', class: 'btn btn-primary btn-block btn-huge' }, ride ? '▶ Reprendre la sortie' : '▶ Démarrer');
+    const startBtn = el('button', { type: 'button', class: 'btn btn-primary btn-block btn-huge' }, icon('play'), ride ? 'Reprendre la sortie' : 'Démarrer');
 
     // Plan nutrition : celui de l'écran « Plan nutrition », figé au démarrage.
     // (Pour une sortie reprise, on garde celui figé au départ.)
@@ -204,46 +213,53 @@ export function createRideView(simulated: boolean): View {
         ? `${routeNutrition.plan.intakes.length} prises, ${routeNutrition.plan.plannedTotalG} g de glucides (${routeNutrition.during.targetGPerH} g/h). Le plan sera figé au démarrage.`
         : `Pas de prise prévue${routeNutrition?.plan.emptyReason ? ` : ${routeNutrition.plan.emptyReason}` : '.'}`;
 
-    const soundCheck = el('input', { type: 'checkbox', id: 'ride-sound', checked: rideSettings.sound });
+    const soundCheck = el('input', { type: 'checkbox', class: 'switch', id: 'ride-sound', checked: rideSettings.sound });
     const drinkSelect = el(
       'select',
-      { id: 'ride-drink', class: 'select' },
+      { id: 'ride-drink' },
       ...[0, 15, 20, 25, 30].map((m) => el('option', { value: m, selected: m === rideSettings.drinkIntervalMin }, m === 0 ? 'Désactivé' : `Toutes les ${m} min`)),
     );
-    const testSoundBtn = el('button', { type: 'button', class: 'btn btn-small' }, '🔊 Tester le son');
+    const testSoundBtn = el('button', { type: 'button', class: 'btn btn-small' }, icon('volume'), 'Tester');
     // Carte hors ligne : avertissement + bouton si elle manque pour cet itinéraire.
-    const offlineWarning = el('p', { class: 'notice-inline', hidden: true }, '⚠ Pas de carte hors ligne pour cet itinéraire : en zone blanche, le fond de carte restera vide (le tracé, ta position et les alertes fonctionnent quand même).');
+    const offlineWarning = el('p', { class: 'notice-inline', hidden: true }, icon('warning'), 'Pas de carte hors ligne pour cet itinéraire : en zone blanche, le fond de carte restera vide (le tracé, ta position et les alertes fonctionnent quand même).');
     const offlineCard = createOfflinePackCard(route.id, route.name, track.points, {
       compact: true,
       onChange: (pack) => (offlineWarning.hidden = pack?.status === 'complete'),
     });
-    const offlineBox = el('div', { class: 'card stack' }, el('h2', {}, '🗺 Carte hors ligne'), offlineWarning, offlineCard.element);
+    const offlineBox = el('div', { class: 'card stack' }, el('h2', {}, icon('cloud-download'), 'Carte hors ligne'), offlineWarning, offlineCard.element);
 
     const alertsCard = el(
       'div',
-      { class: 'card stack' },
-      el('h2', {}, '🍌 Ravitaillement'),
-      el('p', {}, planLine),
-      el('a', { href: `#/nutrition/${encodeURIComponent(route.id)}`, class: 'muted' }, 'Voir / modifier le plan nutrition'),
-      el('label', { class: 'pack-item' }, soundCheck, el('span', {}, 'Son des alertes'), el('span', {}, '')),
-      el('div', {}, testSoundBtn),
-      el('label', { for: 'ride-drink', class: 'field-label' }, '💧 Rappel boisson (temps en mouvement)'),
-      drinkSelect,
-      el('p', { class: 'notice-inline' }, '⚠ Le bouton silencieux de l’iPhone (sur le côté) coupe le son de l’appli : laisse-le côté « son » (pas d’orange visible) et monte le volume.'),
+      {},
+      el('div', { class: 'group-title' }, 'Ravitaillement'),
+      el(
+        'div',
+        { class: 'group' },
+        el('div', { class: 'form-row' }, el('span', { class: 'row-label' }, icon('utensils'), planLine)),
+        el('a', { href: `#/nutrition/${encodeURIComponent(route.id)}`, class: 'form-row' }, el('span', { class: 'row-label' }, 'Voir / modifier le plan nutrition'), el('span', { class: 'row-value' }, icon('chevron-right'))),
+        el('label', { class: 'form-row', for: 'ride-sound' }, el('span', { class: 'row-label' }, icon('volume'), 'Son des alertes'), testSoundBtn, soundCheck),
+        el('label', { class: 'form-row', for: 'ride-drink' }, el('span', { class: 'row-label' }, icon('droplet'), 'Rappel boisson'), drinkSelect),
+      ),
+      el('p', { class: 'group-footer' }, 'Rappel boisson compté en temps en mouvement.'),
+      el('p', { class: 'notice-inline', style: 'margin-top:10px' }, icon('warning'), 'Le bouton silencieux de l’iPhone (sur le côté) coupe le son de l’appli : laisse-le côté « son » (pas d’orange visible) et monte le volume.'),
     );
     const intro = el(
       'div',
       { class: 'ride-intro' },
-      el('a', { href: `#/itineraire/${encodeURIComponent(route.id)}`, class: 'back-link' }, '‹ Retour'),
+      el('a', { href: `#/itineraire/${encodeURIComponent(route.id)}`, class: 'back-link' }, icon('chevron-left'), 'Retour'),
       el('h1', {}, simulated ? `Simulation : ${route.name}` : route.name),
-      el('p', {}, `${km(totalM)} km · ${climbList.length} montée${climbList.length > 1 ? 's' : ''} repérée${climbList.length > 1 ? 's' : ''}`),
+      el(
+        'div',
+        { class: 'chips' },
+        el('span', { class: 'chip' }, icon('route'), `${km(totalM)} km`),
+        el('span', { class: 'chip' }, icon('mountain'), `${climbList.length} montée${climbList.length > 1 ? 's' : ''} repérée${climbList.length > 1 ? 's' : ''}`),
+      ),
       simulated
         ? el(
             'div',
             { class: 'card stack' },
             el('p', {}, `Rejoue l’itinéraire à ${int(profile.avgSpeedKmh)} km/h avec un arrêt au km 1, un écart de 80 m au km 2 et une coupure GPS au km 3. La sortie simulée apparaît ensuite dans « Mes sorties » (tu peux la supprimer).`),
-            el('label', { for: 'sim-factor', class: 'field-label' }, 'Vitesse de la simulation'),
-            factorSelect,
+            el('label', { for: 'sim-factor', class: 'form-row group' }, el('span', { class: 'row-label' }, icon('flask'), 'Vitesse'), factorSelect),
           )
         : el(
             'div',
@@ -253,7 +269,7 @@ export function createRideView(simulated: boolean): View {
           ),
       offlineBox,
       alertsCard,
-      el('p', { class: 'muted' }, 'En sortie : glisse sur le bandeau du bas (ou touche ● ○ ○) pour changer de page. 🔓 verrouille l’écran.'),
+      el('p', { class: 'muted', style: 'margin-top:16px' }, 'En sortie : glisse sur le bandeau du bas (ou touche les points) pour changer de page. Le cadenas verrouille l’écran.'),
       startBtn,
     );
 
@@ -266,10 +282,10 @@ export function createRideView(simulated: boolean): View {
     // « Sens de la marche » par défaut en sortie ; le bouton ou la boussole basculent.
     let orientation: OrientationMode = 'heading';
     const ORIENT_LABELS: Record<OrientationMode, string> = { heading: 'Carte : marche', north: 'Carte : nord' };
-    orientBtn.textContent = ORIENT_LABELS[orientation];
+    setCtrl(orientBtn, 'compass', ORIENT_LABELS[orientation]);
     function toggleOrientation(): void {
       orientation = orientation === 'heading' ? 'north' : 'heading';
-      orientBtn.textContent = ORIENT_LABELS[orientation];
+      setCtrl(orientBtn, 'compass', ORIENT_LABELS[orientation]);
       map?.setOrientation(orientation);
     }
     orientBtn.addEventListener('click', toggleOrientation);
@@ -293,7 +309,7 @@ export function createRideView(simulated: boolean): View {
       void saveRideSettings(rideSettings).catch((err: unknown) => toast(errorMessage(err), 'error'));
     }
     function refreshSoundBtn(): void {
-      soundBtn.textContent = rideSettings.sound ? '🔊 Son' : '🔇 Muet';
+      setCtrl(soundBtn, rideSettings.sound ? 'volume' : 'volume-off', rideSettings.sound ? 'Son' : 'Muet');
       soundBtn.classList.toggle('btn-on', rideSettings.sound);
     }
     refreshSoundBtn();
@@ -336,11 +352,11 @@ export function createRideView(simulated: boolean): View {
 
     const wakeLock = new ScreenWakeLock((activeLock) => {
       if (!ScreenWakeLock.supported) return;
-      wakeBtn.textContent = `Écran : ${activeLock ? 'OUI' : 'NON'}`;
+      setCtrl(wakeBtn, 'sun', `Écran : ${activeLock ? 'oui' : 'non'}`);
       wakeBtn.classList.toggle('btn-on', activeLock);
     });
     if (!ScreenWakeLock.supported) {
-      wakeBtn.textContent = 'Écran : n/d';
+      setCtrl(wakeBtn, 'sun', 'Écran : n/d');
       wakeBtn.disabled = true;
     }
 
@@ -380,7 +396,7 @@ export function createRideView(simulated: boolean): View {
         main = el(
           'div',
           { class: 'climb-box climbing' },
-          el('div', { class: 'climb-title' }, '⛰ Montée en cours'),
+          el('div', { class: 'climb-title' }, icon('mountain'), 'Montée en cours'),
           el('div', { class: 'climb-big' }, `Sommet dans ${c.remainingM >= 1000 ? `${km(c.remainingM)} km` : `${int(c.remainingM)} m`}`),
           el('div', { class: 'climb-figures' }, el('span', {}, `+${int(c.remainingGainM)} m`), el('span', {}, `pente ${int(c.gradePct)} %`)),
         );
@@ -389,7 +405,7 @@ export function createRideView(simulated: boolean): View {
         main = el(
           'div',
           { class: 'climb-box' },
-          el('div', { class: 'climb-title' }, 'Prochaine montée'),
+          el('div', { class: 'climb-title' }, icon('mountain'), 'Prochaine montée'),
           el('div', { class: 'climb-big' }, `dans ${km(n.distanceToStartM)} km`),
           el(
             'div',
@@ -417,7 +433,7 @@ export function createRideView(simulated: boolean): View {
       tAvg.set(snap.movingTimeS > 30 ? fmt1((snap.distanceM / snap.movingTimeS) * 3.6) : '—');
       // « Pause auto » seulement si on a une position récente qui dit qu'on est arrêté
       // (pas pendant une coupure GPS, où l'on ne sait rien).
-      tMoving.note.textContent = snap.speedMs !== null && !snap.isMoving ? ' ⏸ pause' : '';
+      tMoving.note.textContent = snap.speedMs !== null && !snap.isMoving ? ' · pause' : '';
       if (lastMatch) {
         tLeft.set(km(Math.max(0, totalM - lastMatch.alongM)));
         if (elevation && cumClimb) tClimbLeft.set(int(remainingClimb(elevation, cumClimb, lastMatch.alongM)));
@@ -442,7 +458,7 @@ export function createRideView(simulated: boolean): View {
         else if (offTrack && lastMatch.offTrackM < OFF_TRACK_OFF_M) offTrack = false;
       }
       offTrackBanner.hidden = !offTrack;
-      if (offTrack && lastMatch) offTrackBanner.textContent = `⚠ Hors tracé : ${int(lastMatch.offTrackM)} m`;
+      if (offTrack && lastMatch) offTrackBanner.replaceChildren(icon('warning'), `Hors tracé : ${int(lastMatch.offTrackM)} m`);
 
       // Ravitaillement : position sur le tracé si on y est, sinon temps estimé.
       if (nut) {
@@ -592,10 +608,10 @@ export function createRideView(simulated: boolean): View {
     finishBtn.addEventListener('click', async () => {
       if (!finishBtn.classList.contains('confirm')) {
         finishBtn.classList.add('confirm');
-        finishBtn.textContent = 'Confirmer ?';
+        setCtrl(finishBtn, 'check', 'Confirmer ?');
         confirmTimer = window.setTimeout(() => {
           finishBtn.classList.remove('confirm');
-          finishBtn.textContent = 'Terminer';
+          setCtrl(finishBtn, 'square', 'Terminer');
         }, 4000);
         return;
       }

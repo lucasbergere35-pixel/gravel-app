@@ -21,6 +21,7 @@ import { toast } from '../components/toast';
 import { append, el, errorMessage } from '../dom';
 import { duration, int, km } from '../format';
 import { describeHelp } from '../help';
+import { icon } from '../icons';
 import { navigate, type View } from '../router';
 
 const BOTTLE_ML = 750;
@@ -50,7 +51,7 @@ export const nutritionView: View = async (root, params) => {
   const bigClimbs = prepared.climbs.filter(isBigClimb).length;
   let energy: EnergyResult = computeEnergy(prepared, profile, prefs);
 
-  const settingsCard = el('section', { class: 'card stack' });
+  const settingsCard = el('section', {});
   const energyCard = el('section', { class: 'card' });
   const preCard = el('section', { class: 'card' });
   const duringCard = el('section', { class: 'card' });
@@ -76,7 +77,8 @@ export const nutritionView: View = async (root, params) => {
       max: TARGET_MAX_G_PER_H,
       step: 5,
       value: prefs.targetGPerH ?? '',
-      placeholder: `auto : ${during.autoTargetGPerH || 'facultatif'}`,
+      placeholder: `auto (${during.autoTargetGPerH || '—'})`,
+      'aria-label': 'Objectif de glucides en grammes par heure',
     });
     target.addEventListener('change', () => {
       const v = Number.parseFloat(target.value.replace(',', '.'));
@@ -88,7 +90,7 @@ export const nutritionView: View = async (root, params) => {
       void persistPrefs();
       renderAll();
     });
-    const autoBtn = el('button', { type: 'button', class: 'btn btn-small' }, 'Auto');
+    const autoBtn = el('button', { type: 'button', class: 'btn btn-small', hidden: prefs.targetGPerH === null }, 'Auto');
     autoBtn.addEventListener('click', () => {
       prefs.targetGPerH = null;
       void persistPrefs();
@@ -96,8 +98,8 @@ export const nutritionView: View = async (root, params) => {
     });
     const boost = el(
       'select',
-      { id: 'climb-boost', class: 'select' },
-      ...BOOST_CHOICES.map((b) => el('option', { value: b, selected: b === prefs.climbBoostPct }, b === 0 ? 'Aucun (puissance constante)' : `+${b} %`)),
+      { id: 'climb-boost', 'aria-label': 'Effort en montée' },
+      ...BOOST_CHOICES.map((b) => el('option', { value: b, selected: b === prefs.climbBoostPct }, b === 0 ? 'Aucun' : `+${b} %`)),
     );
     boost.addEventListener('change', () => {
       prefs.climbBoostPct = Number(boost.value);
@@ -107,26 +109,33 @@ export const nutritionView: View = async (root, params) => {
     });
 
     settingsCard.replaceChildren(
-      el('h2', {}, 'Réglages du plan'),
-      el('label', { for: 'target-gph', class: 'field-label' }, 'Objectif de glucides (g/h)'),
-      el('div', { class: 'row' }, target, autoBtn),
+      el('div', { class: 'group-title' }, 'Réglages du plan'),
+      el(
+        'div',
+        { class: 'group' },
+        el('label', { class: 'form-row', for: 'target-gph' }, el('span', { class: 'row-label' }, icon('zap'), 'Glucides'), autoBtn, target, el('span', { class: 'unit' }, 'g/h')),
+        el(
+          'label',
+          { class: 'form-row', for: 'climb-boost' },
+          el('span', { class: 'row-label' }, icon('trending-up'), `Effort > ${int(CLIMB_BOOST_FULL_GRADE * 100)} %`),
+          boost,
+        ),
+      ),
       el(
         'p',
-        { class: 'muted' },
+        { class: 'group-footer' },
         prefs.targetGPerH === null
           ? `Automatique : ${during.autoTargetGPerH ? `${during.autoTargetGPerH} g/h` : 'facultatif (sortie < 1 h 30)'} pour le niveau ${LEVEL_LABELS[profile.level].toLowerCase()} (fourchette ${during.rangeGPerH[0]}–${during.rangeGPerH[1]} g/h).`
           : `Réglé à la main. Valeur automatique : ${during.autoTargetGPerH || 'facultatif'} g/h.`,
       ),
-      el('label', { for: 'climb-boost', class: 'field-label' }, `Effort en montée (pentes > ${int(CLIMB_BOOST_FULL_GRADE * 100)} %)`),
-      boost,
-      el('p', { class: 'muted' }, 'De combien tu appuies plus fort en côte qu’à plat. Ta vitesse moyenne totale reste la même.'),
+      el('p', { class: 'group-footer' }, 'Effort en montée : de combien tu appuies plus fort en côte qu’à plat. Ta vitesse moyenne totale reste la même.'),
     );
   }
 
   // ---------- Dépense ----------
   function renderEnergy(): void {
     fill(energyCard,
-      el('h2', {}, 'Dépense estimée'),
+      el('h2', {}, icon('zap'), 'Dépense estimée'),
       el('div', { class: 'big-figure' }, `≈ ${int(Math.round(energy.metabolicKcal / 10) * 10)} kcal`),
       el(
         'p',
@@ -174,7 +183,7 @@ export const nutritionView: View = async (root, params) => {
     const pre = preRideCarbs(energy.durationS, profile.weightKg);
     const during = duringRideCarbs(energy.durationS, profile.level, prefs.targetGPerH);
     preCard.replaceChildren(
-      el('h2', {}, 'Avant la sortie'),
+      el('h2', {}, icon('clock'), 'Avant la sortie'),
       el('p', {}, el('strong', {}, `${pre.totalG} g de glucides`), ` (${pre.gPerKg} g/kg), ${pre.hoursBefore[0]} à ${pre.hoursBefore[1]} h avant le départ.`),
       el('p', { class: 'muted' }, 'Par exemple, au total :'),
       el(
@@ -186,7 +195,7 @@ export const nutritionView: View = async (root, params) => {
     );
     const bottles = Math.ceil(during.waterTotalMl / BOTTLE_ML);
     duringCard.replaceChildren(
-      el('h2', {}, 'Pendant la sortie'),
+      el('h2', {}, icon('droplet'), 'Pendant la sortie'),
       during.optional
         ? el('p', {}, el('strong', {}, 'Glucides facultatifs'), ' : sortie de moins de 1 h 30. Emporte quand même un en-cas de secours.')
         : el('p', {}, el('strong', {}, `${during.targetGPerH} g de glucides par heure`), ` à partir de la ${int(FIRST_INTAKE_S / 60)}e minute.`),
@@ -205,7 +214,7 @@ export const nutritionView: View = async (root, params) => {
     const { during, plan } = computePlan(prepared, energy, profile, prefs, foods);
 
     fill(packCard,
-      el('h2', {}, 'J’emporte'),
+      el('h2', {}, icon('utensils'), 'J’emporte'),
       el(
         'div',
         { class: 'pack-list' },
@@ -231,12 +240,12 @@ export const nutritionView: View = async (root, params) => {
       ),
       foods.some((f) => f.selected && f.kind === 'rapide') || bigClimbs === 0
         ? null
-        : el('p', { class: 'notice-inline' }, '⚠ Aucun aliment rapide coché : les prises avant les montées utiliseront ce que tu as.'),
-      el('a', { href: '#/aliments', class: 'btn btn-small' }, 'Modifier mes aliments'),
+        : el('p', { class: 'notice-inline' }, icon('warning'), 'Aucun aliment rapide coché : les prises avant les montées utiliseront ce que tu as.'),
+      el('a', { href: '#/aliments', class: 'btn btn-small' }, icon('pencil'), 'Modifier mes aliments'),
     );
 
     if (plan.emptyReason) {
-      planCard.replaceChildren(el('h2', {}, 'Plan des prises'), el('p', {}, plan.emptyReason));
+      planCard.replaceChildren(el('h2', {}, icon('flag'), 'Plan des prises'), el('p', {}, plan.emptyReason));
       return;
     }
     const intervalMin = Math.round((plan.fuelHours * 60) / Math.max(1, plan.intakes.length));
@@ -244,7 +253,7 @@ export const nutritionView: View = async (root, params) => {
     planCard.replaceChildren();
     append(
       planCard,
-      el('h2', {}, 'Plan des prises'),
+      el('h2', {}, icon('flag'), 'Plan des prises'),
       el(
         'div',
         { class: `plan-summary${overshoot ? ' warn' : ''}` },
@@ -261,18 +270,20 @@ export const nutritionView: View = async (root, params) => {
       planCard,
       el(
         'ol',
-        { class: 'intake-list' },
+        { class: 'timeline' },
         ...plan.intakes.map((i) =>
           el(
             'li',
-            { class: `intake${i.reason === 'preClimb' ? ' pre-climb' : ''}${i.onSlope ? ' on-slope' : ''}` },
-            el('div', { class: 'intake-km' }, `Km ${int(i.distanceM / 1000)}`),
+            { class: `tl-item${i.reason === 'preClimb' ? ' pre-climb' : ''}${i.onSlope ? ' on-slope' : ''}` },
+            el('div', { class: 'tl-km' }, 'km', el('br'), int(i.distanceM / 1000)),
+            el('div', { class: 'tl-dot' }),
             el(
               'div',
-              { class: 'intake-body' },
-              el('div', { class: 'intake-what' }, i.label, el('span', { class: 'muted' }, ` · ${fr(i.carbsG)} g`)),
-              el('div', { class: 'intake-why' }, `${i.reason === 'preClimb' ? '⛰ ' : ''}${i.why}`),
-              el('div', { class: 'muted' }, `vers ${duration(i.timeS)}${i.onSlope ? ' · ⚠ en pente : attends le replat' : ''}`),
+              { class: 'tl-body' },
+              el('div', { class: 'tl-what' }, i.label, el('span', { class: 'muted' }, ` · ${fr(i.carbsG)} g`)),
+              el('div', { class: 'tl-why' }, i.reason === 'preClimb' ? icon('mountain') : null, i.why),
+              el('div', { class: 'tl-when' }, `vers ${duration(i.timeS)}`),
+              i.onSlope ? el('div', { class: 'notice-inline tl-when' }, icon('warning'), 'En pente : attends le replat') : null,
             ),
           ),
         ),
@@ -293,11 +304,17 @@ export const nutritionView: View = async (root, params) => {
 
   append(
     root,
-    el('a', { href: `#/itineraire/${encodeURIComponent(route.id)}`, class: 'back-link' }, `‹ ${route.name}`),
+    el('a', { href: `#/itineraire/${encodeURIComponent(route.id)}`, class: 'back-link' }, icon('chevron-left'), route.name),
     el('h1', {}, 'Plan nutrition'),
-    el('p', {}, `${km(cum[cum.length - 1] ?? 0)} km · ${int(route.stats.gainM)} m D+ · ${bigClimbs} montée${bigClimbs > 1 ? 's' : ''} importante${bigClimbs > 1 ? 's' : ''}`),
-    profile.complete ? null : el('div', { class: 'card notice' }, 'Profil incomplet : calcul fait avec des valeurs par défaut (70 kg…). ', el('a', { href: '#/profil' }, 'Compléter mon profil')),
-    el('div', { class: 'card disclaimer' }, el('strong', {}, 'ℹ À lire : '), describeHelp.medical),
+    el(
+      'div',
+      { class: 'chips' },
+      el('span', { class: 'chip' }, icon('route'), `${km(cum[cum.length - 1] ?? 0)} km`),
+      el('span', { class: 'chip' }, icon('trending-up'), `${int(route.stats.gainM)} m`),
+      el('span', { class: 'chip' }, icon('mountain'), `${bigClimbs} montée${bigClimbs > 1 ? 's' : ''} importante${bigClimbs > 1 ? 's' : ''}`),
+    ),
+    profile.complete ? null : el('div', { class: 'card notice' }, icon('warning'), el('div', {}, 'Profil incomplet : calcul fait avec des valeurs par défaut (70 kg…). ', el('a', { href: '#/profil' }, 'Compléter mon profil'))),
+    el('div', { class: 'card disclaimer' }, icon('info'), el('div', {}, el('strong', {}, 'À lire : '), describeHelp.medical)),
     planCard,
     packCard,
     settingsCard,

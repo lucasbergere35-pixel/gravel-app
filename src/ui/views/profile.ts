@@ -8,11 +8,15 @@ import { readTextFile, shareOrDownload } from '../../services/files';
 import { toast } from '../components/toast';
 import { append, el, errorMessage } from '../dom';
 import { describeHelp } from '../help';
+import { icon, type IconName } from '../icons';
 import type { View } from '../router';
 
 interface NumField {
   key: 'weightKg' | 'heightCm' | 'age' | 'bikeKg' | 'avgSpeedKmh';
   label: string;
+  short: string;
+  unit: string;
+  icon: IconName;
   min: number;
   max: number;
   step: number;
@@ -20,20 +24,25 @@ interface NumField {
 }
 
 const NUM_FIELDS: NumField[] = [
-  { key: 'weightKg', label: 'Poids (kg)', min: 30, max: 200, step: 0.5 },
-  { key: 'heightCm', label: 'Taille (cm)', min: 120, max: 220, step: 1 },
-  { key: 'age', label: 'Âge', min: 10, max: 100, step: 1 },
-  { key: 'bikeKg', label: 'Poids du vélo équipé (kg)', min: 5, max: 40, step: 0.5, help: 'Vélo + sacoches + bidons pleins.' },
-  { key: 'avgSpeedKmh', label: 'Vitesse moyenne en gravel (km/h)', min: 5, max: 45, step: 0.5, help: 'Ta moyenne habituelle en roulant, montées comprises, hors pauses.' },
+  { key: 'weightKg', label: 'Poids (kg)', short: 'Poids', unit: 'kg', icon: 'user', min: 30, max: 200, step: 0.5 },
+  { key: 'heightCm', label: 'Taille (cm)', short: 'Taille', unit: 'cm', icon: 'move-horizontal', min: 120, max: 220, step: 1 },
+  { key: 'age', label: 'Âge', short: 'Âge', unit: 'ans', icon: 'hourglass', min: 10, max: 100, step: 1 },
+  { key: 'bikeKg', label: 'Poids du vélo équipé (kg)', short: 'Vélo équipé', unit: 'kg', icon: 'bike', min: 5, max: 40, step: 0.5, help: 'Vélo équipé : vélo + sacoches + bidons pleins.' },
+  { key: 'avgSpeedKmh', label: 'Vitesse moyenne en gravel (km/h)', short: 'Vitesse moyenne', unit: 'km/h', icon: 'gauge', min: 5, max: 45, step: 0.5, help: 'Vitesse moyenne : ta moyenne habituelle en roulant, montées comprises, hors pauses.' },
 ];
 
 function radioGroup<T extends string>(name: string, legend: string, options: Record<T, string>, value: T): { node: HTMLElement; get: () => T } {
   const inputs = (Object.keys(options) as T[]).map((k) => {
     const input = el('input', { type: 'radio', name, value: k, id: `${name}-${k}`, checked: k === value });
-    return { k, input, label: el('label', { for: `${name}-${k}`, class: 'choice' }, input, el('span', {}, options[k])) };
+    return { k, input, label: el('label', { for: `${name}-${k}` }, input, options[k]) };
   });
   return {
-    node: el('fieldset', { class: 'choices' }, el('legend', { class: 'field-label' }, legend), ...inputs.map((i) => i.label)),
+    node: el(
+      'div',
+      { class: 'form-row stacked' },
+      el('span', { class: 'row-label' }, legend),
+      el('div', { class: 'segmented', role: 'radiogroup', 'aria-label': legend }, ...inputs.map((i) => i.label)),
+    ),
     get: () => (inputs.find((i) => i.input.checked)?.k ?? value) as T,
   };
 }
@@ -45,19 +54,25 @@ export const profileView: View = async (root) => {
   const fields = NUM_FIELDS.map((f) => {
     const input = el('input', { type: 'number', id: `p-${f.key}`, inputmode: 'decimal', min: f.min, max: f.max, step: f.step, value: profile[f.key], required: true });
     inputs.set(f.key, input);
-    return el('div', { class: 'field' }, el('label', { for: `p-${f.key}`, class: 'field-label' }, f.label), input, f.help ? el('p', { class: 'muted' }, f.help) : null);
+    return el('label', { class: 'form-row', for: `p-${f.key}` }, el('span', { class: 'row-label' }, icon(f.icon), f.short), input, el('span', { class: 'unit' }, f.unit));
   });
   const sex = radioGroup<Sex>('sex', 'Sexe', { homme: 'Homme', femme: 'Femme' }, profile.sex);
   const level = radioGroup<Level>('level', 'Niveau', LEVEL_LABELS, profile.level);
 
   const form = el(
     'form',
-    { class: 'card stack' },
-    ...fields,
-    sex.node,
-    level.node,
-    el('p', { class: 'muted' }, 'Le niveau ajuste la quantité de glucides visée pendant l’effort (un intestin non entraîné tolère moins).'),
-    el('button', { type: 'submit', class: 'btn btn-primary btn-block' }, 'Enregistrer'),
+    {},
+    el('div', { class: 'group-title' }, 'Moi'),
+    el('div', { class: 'group' }, fields[0], fields[1], fields[2], sex.node),
+    el('div', { class: 'group-title' }, 'À vélo'),
+    el('div', { class: 'group' }, fields[3], fields[4], level.node),
+    el(
+      'p',
+      { class: 'group-footer' },
+      ...NUM_FIELDS.filter((f) => f.help).map((f) => `${f.help} `),
+      'Le niveau ajuste la quantité de glucides visée pendant l’effort (un intestin non entraîné tolère moins).',
+    ),
+    el('button', { type: 'submit', class: 'btn btn-primary btn-block', style: 'margin-top:16px' }, icon('check'), 'Enregistrer'),
   );
 
   form.addEventListener('submit', async (e) => {
@@ -82,7 +97,7 @@ export const profileView: View = async (root) => {
   });
 
   // ---------- Mes données ----------
-  const exportBtn = el('button', { type: 'button', class: 'btn btn-block' }, '⬇ Exporter mes données');
+  const exportBtn = el('button', { type: 'button', class: 'form-row row-btn' }, el('span', { class: 'row-label' }, icon('download'), 'Exporter mes données'), el('span', { class: 'row-value' }, icon('chevron-right')));
   exportBtn.addEventListener('click', async () => {
     try {
       const backup = buildBackup(await dumpAll());
@@ -94,7 +109,7 @@ export const profileView: View = async (root) => {
   });
 
   const importInput = el('input', { type: 'file', id: 'backup-input', class: 'visually-hidden' });
-  const importLabel = el('label', { for: 'backup-input', class: 'btn btn-block' }, '⬆ Importer une sauvegarde');
+  const importLabel = el('label', { for: 'backup-input', class: 'form-row row-btn' }, el('span', { class: 'row-label' }, icon('upload'), 'Importer une sauvegarde'), el('span', { class: 'row-value' }, icon('chevron-right')));
   const confirmBox = el('div', { class: 'card confirm-box', hidden: true });
   let pendingBackup: Backup | null = null;
 
@@ -137,19 +152,19 @@ export const profileView: View = async (root) => {
   append(
     root,
     el('h1', {}, 'Profil'),
-    profile.complete ? null : el('div', { class: 'card notice' }, 'Complète ton profil : il sert à estimer ta dépense énergétique et ton plan nutrition.'),
+    profile.complete ? null : el('div', { class: 'card notice' }, icon('info'), 'Complète ton profil : il sert à estimer ta dépense énergétique et ton plan nutrition.'),
     form,
-    el('a', { href: '#/aliments', class: 'btn btn-block', style: 'margin-top:16px' }, '🍌 Mes aliments'),
-    el('a', { href: '#/cartes', class: 'btn btn-block', style: 'margin-top:8px' }, '🗺 Cartes hors ligne'),
+    el('div', { class: 'group-title' }, 'Réglages'),
     el(
-      'section',
-      { class: 'card stack' },
-      el('h2', {}, 'Mes données'),
-      el('p', { class: 'muted' }, describeHelp.backup),
-      exportBtn,
-      importInput,
-      importLabel,
-      confirmBox,
+      'div',
+      { class: 'group' },
+      el('a', { href: '#/aliments', class: 'form-row' }, el('span', { class: 'row-label' }, icon('apple'), 'Mes aliments'), el('span', { class: 'row-value' }, icon('chevron-right'))),
+      el('a', { href: '#/cartes', class: 'form-row' }, el('span', { class: 'row-label' }, icon('map'), 'Cartes hors ligne'), el('span', { class: 'row-value' }, icon('chevron-right'))),
     ),
+    el('div', { class: 'group-title' }, 'Mes données'),
+    el('div', { class: 'group' }, exportBtn, importLabel),
+    importInput,
+    el('p', { class: 'group-footer' }, describeHelp.backup),
+    confirmBox,
   );
 };

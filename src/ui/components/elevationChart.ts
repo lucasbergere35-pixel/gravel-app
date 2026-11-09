@@ -1,9 +1,10 @@
 /**
- * Profil altimétrique en SVG, dessiné à la largeur réelle de l'écran.
+ * Profil altimétrique en SVG, coloré selon la pente (légende sous le graphique), dessiné à la largeur réelle de l'écran.
  * Glisser le doigt horizontalement affiche distance/altitude et
  * déclenche onHover(distance) (pour placer un repère sur la carte).
  */
 import type { ElevationProfile } from '../../core/geo/elevation';
+import { SLOPE_CLASSES, slopeRuns } from '../../core/geo/slope';
 import { el } from '../dom';
 import { int, km } from '../format';
 
@@ -35,6 +36,12 @@ export function createElevationChart(
   const wrapper = el('div', { class: 'elevation-chart' });
   const readout = el('div', { class: 'chart-readout', 'aria-live': 'off' }, 'Glisse le doigt sur le profil');
   wrapper.append(readout);
+  const runs = slopeRuns(profile);
+  const legend = el(
+    'div',
+    { class: 'slope-legend', 'aria-label': 'Couleurs de pente' },
+    ...SLOPE_CLASSES.map((c) => el('span', {}, el('i', { style: `background:${c.color}` }), c.label)),
+  );
 
   const { distances, elevations } = profile;
   const total = distances[distances.length - 1] || 1;
@@ -94,7 +101,17 @@ export function createElevationChart(
       line += `${k === 0 ? 'M' : 'L'}${x(distances[i]).toFixed(1)},${y(elevations[i]).toFixed(1)}`;
     }
     const baseY = M.top + plotH;
-    root.append(svg('path', { d: `${line}L${x(total)},${baseY}L${x(0)},${baseY}Z`, class: 'area' }));
+    // Aire colorée par tronçon de pente.
+    const stride = Math.max(1, Math.floor(n / (plotW * 2)));
+    for (const r of runs) {
+      let d = `M${x(distances[r.from]).toFixed(1)},${baseY}`;
+      for (let i = r.from; ; i = Math.min(r.to, i + stride)) {
+        d += `L${x(distances[i]).toFixed(1)},${y(elevations[i]).toFixed(1)}`;
+        if (i === r.to) break;
+      }
+      d += `L${x(distances[r.to]).toFixed(1)},${baseY}Z`;
+      root.append(svg('path', { d, fill: SLOPE_CLASSES[r.cls].color, 'fill-opacity': 0.85, stroke: SLOPE_CLASSES[r.cls].color, 'stroke-width': 0.6 }));
+    }
     root.append(svg('path', { d: line, class: 'line' }));
 
     // Curseur
@@ -132,7 +149,7 @@ export function createElevationChart(
     });
 
     if (currentSvg) currentSvg.replaceWith(root);
-    else wrapper.append(root);
+    else wrapper.append(root, legend);
     currentSvg = root;
   }
 

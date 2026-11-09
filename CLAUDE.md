@@ -8,11 +8,23 @@ Utilisateur : débutant en développement web, sur **Windows, sans Mac**. Expliq
 
 ## Priorités
 Robustesse et code clair > nombre de fonctionnalités. Mobile d'abord, lisible en plein soleil
-(thème clair fort contraste, gros chiffres, boutons ≥ 52 px). Aucun backend, aucune clé API payante.
+(gros chiffres, boutons ≥ 52 px). Aucun backend, aucune clé API payante.
+
+## Design (direction « Épuré clair », inspirée de Komoot sans le copier)
+- Police système (-apple-system / SF Pro), espace, coins arrondis (18 px), ombres légères, accent vert #3d8b37.
+- Couleurs = variables CSS (`--bg`, `--surface`, `--surface-2`, `--text`, `--muted`, `--line`, `--accent`…) en tête de
+  `src/styles.css`. Mode sombre AUTOMATIQUE (`prefers-color-scheme`), SAUF en sortie : `body.ride-mode` force les couleurs claires
+  très contrastées (plein soleil, pas de gris clair, chiffres noirs).
+- AUCUN émoji : icônes Lucide via `icon('nom')` de `src/ui/icons.ts` (n'importe que les icônes listées ; en ajouter une = l'importer
+  et l'ajouter à ICONS). Lucide 1.x : Trash (pas Trash2), TriangleExclamationPoint, FaceSlightlySmiling…
+- Composants CSS : `.card`, `.chips/.chip`, `.badge`, `.btn(-primary/-danger/-small/-block/-huge)`, `.icon-btn`,
+  formulaires type Réglages iOS (`.group-title` + `.group` de `.form-row` avec `.row-label`, `input.switch`, `.segmented`,
+  `.group-footer`), `.timeline/.tl-item` (plan nutrition), fiche itinéraire = `.detail` (carte collante) + `.sheet` (panneau).
+- Barre d'onglets en bas (Itinéraires, Sorties, Aliments, Profil), marges `env(safe-area-inset-*)` ; plus d'en-tête global.
 
 ## Stack
 - Vite + TypeScript strict, **sans framework** (DOM via le helper `el()` de `src/ui/dom.ts`, jamais `innerHTML` avec des données).
-- **MapLibre GL JS** (rotation native, `padding` pour décaler le centre) avec tuiles raster CyclOSM (défaut) et OpenTopoMap, attribution visible, pas de pré-téléchargement de tuiles. Leaflet a été abandonné : pas de rotation (plugins fragiles). Le worker MapLibre est fourni via `setWorkerUrl(...?url)` (sinon introuvable avec Vite) et doit rester dans le précache (`mjs` dans globPatterns).
+- **MapLibre GL JS** (rotation native, `padding` pour décaler le centre) : fond « Gravel » vectoriel (OpenFreeMap, téléchargeable hors ligne) et tuiles raster CyclOSM / OpenTopoMap (en ligne), attribution visible. Leaflet a été abandonné : pas de rotation (plugins fragiles). Le worker MapLibre est fourni via `setWorkerUrl(...?url)` (sinon introuvable avec Vite) et doit rester dans le précache (`mjs` dans globPatterns).
 - IndexedDB via `idb`.
 - vite-plugin-pwa (manifest + service worker Workbox), `registerType: 'prompt'` : pas de rechargement automatique pendant une sortie, bannière « Mettre à jour ».
 - Vitest (+ jsdom pour les tests qui ont besoin de DOMParser ; happy-dom lit mal le XML).
@@ -27,6 +39,8 @@ src/
     geo/elevation.ts   profil : interpolation → ré-échantillonnage 10 m → moyenne glissante 100 m → hystérésis 4 m
     geo/stats.ts       RouteStats + STATS_VERSION (incrémenter si l'algo change → recalcul auto)
     geo/track.ts       pointAtDistance
+    geo/slope.ts       classes de pente du profil (vert < 3 %, jaune 3–6 %, orange 6–9 %, rouge > 9 %, valeur absolue sur 100 m), slopeRuns
+    geo/preview.ts     aperçu miniature du tracé (≤ 80 points dans un carré 0…1) → RouteMeta.preview (calculé à la volée pour les anciens)
     geo/climbs.ts      détection des montées (montée dès +8 m, fin à −10 m sous le sommet, rognage < 2 %, garde ≥ 20 m et ≥ 3 %), climbStatus (en cours / prochaine), gradeAt
     geo/trackMatch.ts  RouteMatcher : progression + écart au tracé, recherche locale (−200 m/+1,5 km) puis globale
     gps/heading.ts     HeadingEstimator : cap depuis les déplacements, > 5 km/h et ≥ 10 m, lissage circulaire, gardé à l'arrêt
@@ -89,13 +103,14 @@ src/
     router.ts          routeur par hash (#/, #/itineraire/:id, #/nutrition/:id, #/profil, #/aliments, #/sortie/:id, #/simulation/:id,
                        #/sorties, #/sorties/:id, #/cartes)
     help.ts            textes réutilisés (avertissement médical, aide sauvegarde)
+    icons.ts           icônes Lucide (icon(nom, classe?) → <svg class="ico">)
     pager.ts           logique pure de pagination (glissement, page mémorisée) — testée
     views/             écrans ; ride.ts = mode sortie (masque en-tête et onglets via body.ride-mode) en 3 pages :
                        0 Tableau de bord (carte + chiffres + commandes), 1 Carte plein écran, 2 Profil (montées) ;
                        profile.ts (formulaire complet + Mes données export/import), foods.ts (enregistrement auto),
                        nutrition.ts (plan des prises en tête avec total prévu et g/h réels, j'emporte, réglages objectif g/h +
                        effort en montée, pendant, avant, dépense + détail du calcul)
-    components/        elevationChart (fiche itinéraire), rideProfile (profil en sortie : parcouru bleu via clipPath, montée orange),
+    components/        elevationChart (fiche itinéraire, aire colorée par pente + légende), rideProfile (profil en sortie : parcouru bleu via clipPath, montée orange),
                        ridePager (pages 3/4 + bandeau 1/4 : vitesse, km, cadenas, points ; glissement UNIQUEMENT sur le bandeau ;
                        cadenas = voile plein écran, appui long 1 s pour déverrouiller ; zone d’alertes commune ; zone « priority »
                        AU-DESSUS du voile), rideAlerts (pré-alerte ; bannières de prise et de boisson SANS BOUTON : son + 40 s
@@ -146,5 +161,7 @@ Déploiement : `git push` sur `main` → GitHub Actions → https://lucasbergere
 - [x] Étape 2 (+ carte orientée dans le sens de la marche, MapLibre) : mode sortie GPS (filtre, recalage, alerte hors tracé > 50 m / levée < 40 m, distance/D+ restants, temps total + temps en mouvement avec pause auto, Wake Lock, reprise au premier plan, enregistrement incrémental + reprise après fermeture, simulation)
 - [x] Mode sortie en 3 pages (tableau de bord / carte / profil avec montées), bandeau fixe, cadenas
 - [x] Étape 3 : profil complet + modèle énergie + plan nutrition (sources : Thomas/Erdman/Burke 2016 ACSM ; Jeukendrup 2014 ; Sawka 2007 ACSM) + export/import de toutes les données en JSON. Toujours afficher l'avertissement « pas un avis médical » (`describeHelp.medical`).
+- [x] Refonte visuelle (direction A) : icônes Lucide, onglets en bas, cartes avec aperçu, fiche carte + panneau, profil par pente,
+  plan en frise, formulaires type iOS, mode sombre automatique (sauf sortie)
 - [x] Étape 4 : alertes de prise en sortie (plan figé, position sur le tracé, pré-alerte, son, Fait/Plus tard/Passer, utilisables cadenas actif), rappel boisson, bilan de fin + ressenti, « Mes sorties », export GPX de la sortie
 - Plus tard : BRouter, points d'eau OSM (Overpass), météo Open-Meteo, cartes hors ligne (autre source de tuiles), type de surface, bilan après sortie

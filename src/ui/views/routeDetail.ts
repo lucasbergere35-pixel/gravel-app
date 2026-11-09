@@ -13,10 +13,16 @@ import { createOfflinePackCard } from '../components/offlinePackCard';
 import { toast } from '../components/toast';
 import { el, errorMessage } from '../dom';
 import { duration, int, km } from '../format';
+import { icon, type IconName } from '../icons';
 import { navigate, type View } from '../router';
 
 function stat(label: string, value: string, unit: string): HTMLElement {
   return el('div', { class: 'stat' }, el('div', { class: 'stat-value' }, value, el('span', { class: 'stat-unit' }, unit)), el('div', { class: 'stat-label' }, label));
+}
+
+function action(ic: IconName, label: string, attrs: Record<string, string>): HTMLElement {
+  const tag = attrs.href ? 'a' : 'button';
+  return el(tag, { class: 'action', ...(tag === 'button' ? { type: 'button' } : {}), ...attrs }, el('span', { class: 'action-ic' }, icon(ic)), label);
 }
 
 export const routeDetailView: View = async (root, params) => {
@@ -40,7 +46,7 @@ export const routeDetailView: View = async (root, params) => {
     renameInput,
     el('button', { type: 'submit', class: 'btn btn-primary' }, 'OK'),
   );
-  const renameBtn = el('button', { type: 'button', class: 'btn btn-small' }, 'Renommer');
+  const renameBtn = el('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Renommer' }, icon('pencil'));
   renameBtn.addEventListener('click', () => {
     renameForm.hidden = false;
     renameBtn.hidden = true;
@@ -73,18 +79,18 @@ export const routeDetailView: View = async (root, params) => {
     'div',
     { class: 'stats-grid' },
     stat('Distance', km(s.distanceM), ' km'),
-    stat(`Durée à ${int(profile.avgSpeedKmh)} km/h`, duration(estimateDurationS(s.distanceM, profile.avgSpeedKmh)), ''),
+    stat(`À ${int(profile.avgSpeedKmh)} km/h`, duration(estimateDurationS(s.distanceM, profile.avgSpeedKmh)), ''),
     s.hasElevation ? stat('Dénivelé +', int(s.gainM), ' m') : null,
     s.hasElevation ? stat('Dénivelé −', int(s.lossM), ' m') : null,
-    s.hasElevation && s.minEleM !== null ? stat('Altitude min', int(s.minEleM), ' m') : null,
-    s.hasElevation && s.maxEleM !== null ? stat('Altitude max', int(s.maxEleM), ' m') : null,
+    s.hasElevation && s.minEleM !== null ? stat('Alt. min', int(s.minEleM), ' m') : null,
+    s.hasElevation && s.maxEleM !== null ? stat('Alt. max', int(s.maxEleM), ' m') : null,
   );
 
   // --- Carte hors ligne ---
   const offlineCard = createOfflinePackCard(meta.id, meta.name, track.points);
 
   // --- Actions ---
-  const exportBtn = el('button', { type: 'button', class: 'btn btn-block' }, 'Exporter en GPX');
+  const exportBtn = action('share', 'Exporter', {});
   exportBtn.addEventListener('click', async () => {
     try {
       const xml = writeGpx({ name: meta.name, points: track.points, waypoints: track.waypoints });
@@ -95,7 +101,7 @@ export const routeDetailView: View = async (root, params) => {
   });
 
   // Suppression en deux appuis (pas de fenêtre de confirmation système).
-  const deleteBtn = el('button', { type: 'button', class: 'btn btn-danger btn-block' }, 'Supprimer');
+  const deleteBtn = el('button', { type: 'button', class: 'btn btn-danger btn-block' }, 'Supprimer l’itinéraire');
   let confirmTimer: number | undefined;
   deleteBtn.addEventListener('click', async () => {
     if (!deleteBtn.classList.contains('confirm')) {
@@ -103,7 +109,7 @@ export const routeDetailView: View = async (root, params) => {
       deleteBtn.textContent = 'Appuie encore pour confirmer la suppression';
       confirmTimer = window.setTimeout(() => {
         deleteBtn.classList.remove('confirm');
-        deleteBtn.textContent = 'Supprimer';
+        deleteBtn.textContent = 'Supprimer l’itinéraire';
       }, 4000);
       return;
     }
@@ -118,23 +124,39 @@ export const routeDetailView: View = async (root, params) => {
     }
   });
 
+  const offlineSection = el('section', { class: 'card' }, el('h2', {}, icon('cloud-download'), 'Carte hors ligne'), offlineCard.element);
+  const chartSection = elevationProfile
+    ? el('section', { class: 'card' }, el('h2', {}, icon('mountain'), 'Profil altimétrique'))
+    : el('p', { class: 'muted' }, 'Ce GPX ne contient pas d’altitude : dénivelé et profil indisponibles.');
+  const id = encodeURIComponent(meta.id);
+  // « Hors ligne » fait défiler jusqu'à l'encart de la carte hors ligne.
+  const offlineBtn = action('cloud-download', 'Hors ligne', {});
+  offlineBtn.addEventListener('click', () => offlineSection.scrollIntoView({ behavior: 'smooth', block: 'center' }));
+
   root.append(
-    el('a', { href: '#/', class: 'back-link' }, '‹ Itinéraires'),
-    el('div', { class: 'title-row' }, title, renameForm, renameBtn),
-    mapEl,
-    stats,
-    elevationProfile
-      ? el('section', { class: 'card' }, el('h2', {}, 'Profil altimétrique'))
-      : el('p', { class: 'muted' }, 'Ce GPX ne contient pas d’altitude : dénivelé et profil indisponibles.'),
-    el('section', { class: 'card' }, el('h2', {}, '🗺 Carte hors ligne'), offlineCard.element),
     el(
       'div',
-      { class: 'stack actions' },
-      el('a', { href: `#/sortie/${encodeURIComponent(meta.id)}`, class: 'btn btn-primary btn-block btn-huge' }, '▶ Démarrer la sortie'),
-      el('a', { href: `#/nutrition/${encodeURIComponent(meta.id)}`, class: 'btn btn-block' }, '🍌 Plan nutrition'),
-      el('a', { href: `#/simulation/${encodeURIComponent(meta.id)}`, class: 'btn btn-block' }, 'Simuler la sortie (test)'),
-      exportBtn,
-      deleteBtn,
+      { class: 'detail' },
+      el('div', { class: 'detail-map' }, el('a', { href: '#/', class: 'float-btn', 'aria-label': 'Itinéraires' }, icon('chevron-left')), mapEl),
+      el(
+        'div',
+        { class: 'sheet' },
+        el('div', { class: 'grab' }),
+        el('div', { class: 'title-row' }, title, renameForm, renameBtn),
+        stats,
+        el('a', { href: `#/sortie/${id}`, class: 'btn btn-primary btn-block btn-huge start-btn' }, icon('play'), 'Démarrer la sortie'),
+        el(
+          'div',
+          { class: 'action-grid' },
+          action('utensils', 'Nutrition', { href: `#/nutrition/${id}` }),
+          offlineBtn,
+          action('flask', 'Simuler', { href: `#/simulation/${id}` }),
+          exportBtn,
+        ),
+        chartSection,
+        offlineSection,
+        el('div', { class: 'actions' }, deleteBtn),
+      ),
     ),
   );
 
@@ -149,7 +171,7 @@ export const routeDetailView: View = async (root, params) => {
   const chart = elevationProfile
     ? createElevationChart(elevationProfile, (d) => map?.setCursor(d === null ? null : pointAtDistance(track.points, cum, d)))
     : null;
-  if (chart) root.querySelector('section.card')?.append(chart.element);
+  if (chart) chartSection.append(chart.element);
 
   return () => {
     offlineCard.destroy();

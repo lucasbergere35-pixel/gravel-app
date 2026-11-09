@@ -5,7 +5,7 @@
  *   │ alertes (toutes pages)   │
  *   │   pages (3/4 haut)       │ ← la carte s'y déplace au doigt librement
  *   ├──────────────────────────┤
- *   │ vitesse   km   🔓        │ ← bandeau fixe (1/4 bas) : seul endroit où
+ *   │ vitesse   km   cadenas   │ ← bandeau fixe (1/4 bas) : seul endroit où
  *   │   ●   ○   ○              │   glisser change de page
  *   └──────────────────────────┘
  *
@@ -13,6 +13,7 @@
  * appuis, et seul un appui long (UNLOCK_HOLD_MS) déverrouille.
  */
 import { el } from '../dom';
+import { icon } from '../icons';
 import { pageAfterSwipe, parseStoredPage } from '../pager';
 
 const UNLOCK_HOLD_MS = 1000;
@@ -48,7 +49,7 @@ export function createRidePager(pageTitles: string[], onPageChange: (index: numb
   // ---------- Bandeau ----------
   const speedValue = el('span', {}, '—');
   const distValue = el('span', {}, '0,0');
-  const lockBtn = el('button', { type: 'button', class: 'band-lock', 'aria-label': 'Verrouiller l’écran' }, '🔓');
+  const lockBtn = el('button', { type: 'button', class: 'band-lock', 'aria-label': 'Verrouiller l’écran' }, icon('lock-open'));
   const dots = pageTitles.map((title, i) =>
     el('button', { type: 'button', class: 'band-dot', 'aria-label': `Page ${i + 1} : ${title}` }, el('span', { class: 'dot' }), el('span', { class: 'dot-label' }, title)),
   );
@@ -70,7 +71,7 @@ export function createRidePager(pageTitles: string[], onPageChange: (index: numb
   const lockOverlay = el(
     'div',
     { class: 'lock-overlay', hidden: true },
-    el('div', { class: 'lock-badge' }, el('strong', {}, '🔒 Écran verrouillé'), el('span', {}, 'Maintiens le doigt 1 s n’importe où pour déverrouiller'), progress),
+    el('div', { class: 'lock-badge' }, el('strong', {}, icon('lock'), 'Écran verrouillé'), el('span', {}, 'Maintiens le doigt 1 s n’importe où pour déverrouiller'), progress),
   );
 
   const priority = el('div', { class: 'ride-priority', 'aria-live': 'assertive' });
@@ -119,7 +120,7 @@ export function createRidePager(pageTitles: string[], onPageChange: (index: numb
   function setLocked(locked: boolean): void {
     lockOverlay.hidden = !locked;
     element.classList.toggle('locked', locked);
-    lockBtn.textContent = locked ? '🔒' : '🔓';
+    lockBtn.replaceChildren(icon(locked ? 'lock' : 'lock-open'));
   }
   lockBtn.addEventListener('click', () => setLocked(true));
   const cancelHold = () => {

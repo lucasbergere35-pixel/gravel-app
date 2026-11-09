@@ -14,6 +14,7 @@ import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
 import type { GpsFix } from '../core/gps/types';
 import type { TrackPoint, Waypoint } from '../core/types';
 import { computeRouteStats, STATS_VERSION, type RouteStats } from '../core/geo/stats';
+import { trackPreview } from '../core/geo/preview';
 import type { Backup } from '../core/backup';
 import { DEFAULT_FOODS, sanitizeFoods, type Food } from '../core/nutrition/foods';
 import type { Level } from '../core/nutrition/recommendations';
@@ -31,6 +32,8 @@ export interface RouteMeta {
   sourceFileName?: string;
   stats: RouteStats;
   statsVersion: number;
+  /** Aperçu miniature du tracé (liste) ; calculé à la volée pour les anciens itinéraires. */
+  preview?: [number, number][];
 }
 
 export interface RouteTrack {
@@ -192,11 +195,12 @@ export async function listRoutes(): Promise<RouteMeta[]> {
   const metas = await d.getAll('routes');
   // Recalcule les stats enregistrées avec une ancienne version de l'algorithme.
   for (const meta of metas) {
-    if (meta.statsVersion !== STATS_VERSION) {
+    if (meta.statsVersion !== STATS_VERSION || !meta.preview) {
       const track = await d.get('routeTracks', meta.id);
       if (track) {
         meta.stats = computeRouteStats(track.points);
         meta.statsVersion = STATS_VERSION;
+        meta.preview = trackPreview(track.points);
         await d.put('routes', meta);
       }
     }
@@ -227,6 +231,7 @@ export async function addRoute(input: {
     sourceFileName: input.sourceFileName,
     stats: computeRouteStats(input.points),
     statsVersion: STATS_VERSION,
+    preview: trackPreview(input.points),
   };
   const d = await db();
   const tx = d.transaction(['routes', 'routeTracks'], 'readwrite');

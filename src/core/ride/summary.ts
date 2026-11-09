@@ -10,9 +10,9 @@ import type { NutritionSummary } from './intakes';
 export type FeelingKind = 'bonne' | 'coup-de-mou' | 'fringale';
 
 export const FEELING_LABELS: Record<FeelingKind, string> = {
-  bonne: '😀 Bonne sortie',
-  'coup-de-mou': '😐 Coup de mou',
-  fringale: '😵 Fringale',
+  bonne: 'Bonne sortie',
+  'coup-de-mou': 'Coup de mou',
+  fringale: 'Fringale',
 };
 
 export interface RideFeeling {
